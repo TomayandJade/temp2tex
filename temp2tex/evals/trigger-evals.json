@@ -1,0 +1,34 @@
+[
+  {
+    "query": "I downloaded the official Word author template for a journal. Turn it into an editable Overleaf LaTeX template with the same title page, headings, tables, references, and appendix.",
+    "should_trigger": true
+  },
+  {
+    "query": "The publisher only provides a DOCX manuscript template and a PDF sample. Please reconstruct the journal style as a .cls and main.tex package.",
+    "should_trigger": true
+  },
+  {
+    "query": "This Chinese journal gave me a Word template with bilingual abstracts, footnotes, and formatted tables. I need an editable XeLaTeX template, not a converted manuscript.",
+    "should_trigger": true
+  },
+  {
+    "query": "Compare the official journal Word template against its official LaTeX package using the same manuscript body and show PDF differences.",
+    "should_trigger": true
+  },
+  {
+    "query": "Please polish the English in my journal abstract without changing its structure.",
+    "should_trigger": false
+  },
+  {
+    "query": "Make a bibliography.bib file from these DOI links.",
+    "should_trigger": false
+  },
+  {
+    "query": "Create a new manuscript in the existing elsarticle class using this draft text.",
+    "should_trigger": false
+  },
+  {
+    "query": "Convert this scanned article PDF into searchable text and summarize it.",
+    "should_trigger": false
+  }
+]

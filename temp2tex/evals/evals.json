@@ -1,0 +1,2555 @@
+{
+  "skill_name": "temp2tex",
+  "evals": [
+    {
+      "id": 101,
+      "name": "skill-behavior-word-only-ordinary-conversion",
+      "prompt": "Use $temp2tex on a single official DOCX author template from a journal website. Build an editable Overleaf-ready LaTeX package, but do not run any multi-journal benchmark unless it is needed for this one template.",
+      "expected_output": "A normal Temp2TeX package with journal-template.cls, main.tex, references.bib, figures, assets, template_spec.json, format_gap_log.md, README.md, and optional render artifacts only if local tools are available.",
+      "files": [],
+      "expectations": [
+        "The response treats this as ordinary conversion, not a 30-case regression run.",
+        "The deliverable includes journal-template.cls and main.tex as the default architecture.",
+        "The package includes template_spec.json, format_gap_log.md, and README.md.",
+        "The agent records official evidence and defaults instead of inventing journal rules.",
+        "Tooling such as Word, LibreOffice, TeX, and PDF comparison is used only if available and does not block package delivery.",
+        "For a legacy DOC, DOT, or RTF input, the agent retains the original as evidence and records any LibreOffice conversion used for structural inspection or asset extraction.",
+        "The agent identifies OpenXML by package bytes rather than converting a DOCX-like file merely because a publisher download URL or filename uses a DOC or DOT suffix.",
+        "For EMF or WMF Word artwork, the agent preserves the original asset and uses a recorded PNG/PDF-compatible derivative only when conversion succeeds."
+      ]
+    },
+    {
+      "id": 102,
+      "name": "skill-behavior-web-and-pdf-missing-rules",
+      "prompt": "Use $temp2tex for a journal that has an official author-instructions webpage and a PDF sample article, but no downloadable Word template. Create the LaTeX template anyway and be explicit about what is source-backed versus default.",
+      "expected_output": "A LaTeX template package with a documented evidence ledger and fallback log, plus a verification plan that explains which visual checks remain pending.",
+      "files": [],
+      "expectations": [
+        "The agent does not claim missing rules are official.",
+        "The agent uses format defaults only after checking official evidence.",
+        "template_spec.json separates official, inferred, default, and unsupported decisions.",
+        "format_gap_log.md lists missing evidence and pending verification.",
+        "The output remains an editable .cls + main.tex package."
+      ]
+    },
+    {
+      "id": 103,
+      "name": "skill-behavior-mixed-chinese-english-template",
+      "prompt": "Use $temp2tex to rebuild a Chinese-English mixed journal DOCX template as LaTeX. The source shows Chinese title and abstract first, then English title and abstract, with Chinese references guidance incomplete.",
+      "expected_output": "A CJK-safe XeLaTeX package with journal-template.cls, bilingual front-matter examples, documented defaults for incomplete reference rules, and clear compile instructions.",
+      "files": [],
+      "expectations": [
+        "The generated architecture remains journal-template.cls plus main.tex.",
+        "The class uses a CJK-safe XeLaTeX path instead of English-only defaults.",
+        "Bilingual title, abstract, and keywords behavior follows source order.",
+        "Incomplete reference details are recorded as defaults or review-needed, not official rules.",
+        "README.md explains the required TeX engine and verification steps."
+      ]
+    },
+    {
+      "id": 104,
+      "name": "skill-behavior-official-word-latex-regression",
+      "prompt": "Use $temp2tex for a publisher template system where the official page provides both Word and LaTeX template packages. Generate the LaTeX package from Word and compare it with the official LaTeX template using the same manuscript body.",
+      "expected_output": "A generated package plus regression-style artifacts that compare official LaTeX golden PDF against the Temp2TeX-generated PDF under a fixed body.",
+      "files": [],
+      "expectations": [
+        "The agent recognizes official-LaTeX comparison as the correct main gate for this prompt.",
+        "The official Word and LaTeX sources are recorded from official pages.",
+        "The same normalized manuscript body is used for both LaTeX projects.",
+        "The result includes case_report.json, evaluation.json or grading.json, benchmark outputs, and diff previews when comparison runs.",
+        "The case is marked not_comparable rather than passed if either official side cannot be obtained or compiled."
+      ]
+    },
+    {
+      "id": 105,
+      "name": "skill-behavior-tooling-unavailable",
+      "prompt": "Use $temp2tex to convert an official Word template, but assume this environment has no Word, no LibreOffice, no TeX engine, and no PDF diff tools. Still produce the best useful deliverable.",
+      "expected_output": "An editable LaTeX template package with documented evidence, fallbacks, and README commands for rerunning compile and visual comparison elsewhere.",
+      "files": [],
+      "expectations": [
+        "The agent does not stop just because render or compile tools are unavailable.",
+        "The agent produces journal-template.cls, main.tex, references.bib, figures, assets, template_spec.json, format_gap_log.md, and README.md.",
+        "README.md contains exact compile and optional comparison commands to run later.",
+        "format_gap_log.md marks compile and visual verification as pending.",
+        "The response does not run or require the 30-case corpus."
+      ]
+    },
+    {
+      "id": 106,
+      "name": "skill-behavior-direct-format-cjk-font-gap",
+      "prompt": "Use $temp2tex to convert an official Chinese-English DOCX journal template. It uses only Normal/unstyled paragraphs; the visible title, author, affiliation, abstract, and headings are formatted directly in Word paragraph properties. The source names CJK fonts that are not installed in the XeLaTeX environment.",
+      "expected_output": "An editable CJK-safe journal-template.cls plus main.tex package that preserves direct Word evidence, uses explicit non-standard body size when needed, and records the unavailable source font as a verification gap rather than pretending it was reproduced.",
+      "files": [],
+      "expectations": [
+        "The agent treats paragraph-level w:pPr/w:rPr formatting as evidence instead of discarding the template because semantic Word styles are absent.",
+        "The agent separates title, author, affiliation, abstract, keywords, and numbered heading evidence, and does not turn numbered affiliations into manuscript sections.",
+        "The agent scopes direct-format body evidence between actual manuscript headings and the references boundary instead of selecting an abstract or a long reference entry as the body style.",
+        "The package uses a CJK-safe XeLaTeX class and applies an 8pt or 9pt source body size explicitly rather than passing an unsupported class option.",
+        "The agent preserves half-point source body sizes and records Word fixed line spacing as a render-calibration requirement rather than blindly converting it to a global line-spread multiplier.",
+        "The agent does not claim an unavailable Word CJK font is render-verified; template_spec.json and format_gap_log.md retain the evidence and fallback status.",
+        "The final deliverable remains journal-template.cls plus main.tex with a compile and render verification plan.",
+        "main.tex contains compileable examples for a footnote, equation, table, figure, citation/reference, and appendix rather than only declaring class interfaces."
+      ]
+    },
+    {
+      "id": 117,
+      "name": "skill-behavior-sparse-word-template-style-candidates",
+      "prompt": "Use $temp2tex to convert an official DOCX journal template that contains no article prose, but defines named Word paragraph styles for Title, Author, Abstract, Keywords, Body Text, Heading 1, Heading 2, and Caption. Build an editable LaTeX package and explain what needs visual verification.",
+      "expected_output": "An editable journal-template.cls plus main.tex package that maps the named Word styles into their LaTeX roles, preserves effective inherited formatting, labels those mappings as template-style candidates, and does not claim pixel equivalence without a populated same-content Word comparison.",
+      "files": [],
+      "expectations": [
+        "The agent inspects named semantic paragraph styles even though the document has no article paragraphs.",
+        "The agent maps the candidate body style, title/front matter styles, heading outline levels, and caption style into template_spec.json and journal-template.cls.",
+        "The agent distinguishes a named semantic template style from a generic unused built-in style.",
+        "template_spec.json labels the mappings as template_style_candidate or another explicitly unverified source state.",
+        "The agent preserves the original Word source and proposes or performs a same-content working-copy PDF comparison rather than comparing a blank Word PDF to a populated LaTeX example.",
+        "The final output remains a complete editable .cls plus main.tex package and includes gaps or pending verification in the normal delivery artifacts."
+      ]
+    },
+    {
+      "id": 118,
+      "name": "skill-behavior-deep-heading-table-figure-template",
+      "prompt": "Use $temp2tex to convert an official Word journal template with five numbered heading levels, a fixed-width four-column table with merged cells, and an inline representative figure with known dimensions. Produce an editable LaTeX package from the Word evidence.",
+      "expected_output": "A compileable .cls plus main.tex package that maps heading levels through subparagraph, preserves effective inherited heading formatting, exposes representative table width/column ratios and figure dimensions, and marks any unverified visual choices clearly.",
+      "files": [],
+      "expectations": [
+        "The agent inspects Word effective formatting after basedOn inheritance for all available heading levels.",
+        "The package maps levels four and five to editable LaTeX paragraph and subparagraph controls, exercising them in main.tex.",
+        "The package exposes a source-backed journaltablewidth and representative column-ratio helper without imposing it on unrelated tables.",
+        "The package exposes representative figure width and height from Word drawing evidence without treating page-furniture images as manuscript figures.",
+        "main.tex compiles with table, figure, equation, citation, footnote, and appendix fixtures.",
+        "template_spec.json and format_gap_log.md distinguish source-backed helpers from pending rendered verification."
+      ]
+    },
+    {
+      "id": 1,
+      "name": "elsevier-ecological-indicators-official-latex-regression",
+      "prompt": "Use $temp2tex to convert the official Ecological Indicators/Elsevier Word template into LaTeX, normalize it with the fixed regression manuscript, compile it, and compare the PDF against the official Elsevier LaTeX template compiled with the same manuscript.",
+      "expected_output": "A regression case folder containing official source evidence, a Temp2TeX LaTeX package, normalized official and generated PDFs, PDF diff previews, grading.json, and a case_report.json.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The official source page and template source files are recorded with local paths and hashes.",
+        "The official LaTeX template compiles after the fixed regression body is injected.",
+        "Temp2TeX generates a LaTeX package from the official Word/DOCX source.",
+        "The generated package compiles after the same fixed regression body is injected.",
+        "The official and generated PDFs have the same page count and matching page size.",
+        "The comparison report records pixel-exact status, visual diff scores, and diff preview paths.",
+        "The required zones are present in both PDFs: title, abstract, keywords, headings, tables, figures, references, and appendix."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "mdpi-j-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the MDPI J template system using the official Word and LaTeX template links from the journal instructions page.",
+      "expected_output": "A comparable or not_comparable regression result with official evidence, compile reports, PDF comparison artifacts when possible, and replacement-ready failure evidence when not comparable.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The MDPI instructions page is captured as official evidence.",
+        "The runner records discovered Microsoft Word and LaTeX template links.",
+        "The case is not marked passed unless both official LaTeX and Temp2TeX PDFs compile.",
+        "A not_comparable result explains whether the blocker is source download, LaTeX compilation, or normalization."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "frontiers-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Frontiers author template system using official Word and LaTeX templates.",
+      "expected_output": "A regression case folder with source evidence, normalized PDF builds, PDF diff outputs, and strict layered grading.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The Frontiers author guidelines page is captured.",
+        "The runner identifies Word and LaTeX template entry points.",
+        "The same fixed regression body is injected into official and generated LaTeX projects.",
+        "The grading file uses text, passed, and evidence fields for each expectation."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "ieee-journals-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for IEEE journal templates, using official IEEE Word and LaTeX template sources when the template selector exposes downloadable files.",
+      "expected_output": "A regression case that either passes the layered PDF comparison or records why the official template selector did not provide comparable downloadable sources.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The IEEE official template page is captured.",
+        "The case counts as one template system even if multiple IEEE journals share the package.",
+        "The runner does not use third-party IEEE templates as replacements.",
+        "Failures are explicit and replacement-ready."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "iop-journals-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for IOP journal templates using official IOP Word and LaTeX template pages.",
+      "expected_output": "A regression case folder with IOP source pages, downloaded templates where accessible, normalized compiles, and PDF comparison outputs.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The IOP article format, LaTeX template, and Word template pages are captured.",
+        "The runner records whether single-anonymous or double-anonymous Word templates were selected.",
+        "PDF comparison artifacts are produced when both normalized projects compile.",
+        "The result does not pass if IOP explicitly provides only guidance but no accessible source package."
+      ]
+    },
+    {
+      "id": 6,
+      "name": "optica-universal-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Optica Publishing Group universal journal template.",
+      "expected_output": "A regression case with Optica MS Word and LaTeX ZIP source evidence, normalized PDFs, and visual diff results.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The Optica templates page is captured.",
+        "The runner records MS Word template and LaTeX ZIP package links.",
+        "The normalized official LaTeX project compiles locally or the blocker is recorded.",
+        "The generated PDF is compared against the official normalized PDF."
+      ]
+    },
+    {
+      "id": 7,
+      "name": "rsc-article-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Royal Society of Chemistry article template.",
+      "expected_output": "A regression result that checks RSC Word article template conversion against the RSC LaTeX article template under the same fixed body.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The RSC article template page is captured.",
+        "Microsoft Word and LaTeX article template links are recorded.",
+        "The official LaTeX project and Temp2TeX project use the same regression manuscript body.",
+        "The grading reports table, figure, reference, and appendix zone presence."
+      ]
+    },
+    {
+      "id": 8,
+      "name": "royal-society-open-science-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Royal Society Open Science template using only official Royal Society sources.",
+      "expected_output": "A regression result with official Royal Society source evidence and clear not_comparable handling if official downloadable sources are not accessible.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The Royal Society author pages are captured as official evidence.",
+        "Official LaTeX and Word template sources are required for a pass.",
+        "Overleaf-only entries are not treated as local official source packages unless they can be downloaded or exported.",
+        "A replacement from the backup pool is recommended if the case remains not_comparable."
+      ]
+    },
+    {
+      "id": 9,
+      "name": "acm-primary-article-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the ACM Primary Article Template using official ACM Word and LaTeX template sources.",
+      "expected_output": "A regression result that verifies whether Temp2TeX can reproduce the ACM submission template behavior against the official ACM LaTeX template.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The ACM submissions page is captured.",
+        "The runner records the Microsoft Word submission template and Primary Article Template LaTeX package links.",
+        "The ACM case is counted once as a template system.",
+        "Compile failures caused by class-specific required metadata are recorded rather than ignored."
+      ]
+    },
+    {
+      "id": 10,
+      "name": "agu-journals-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for AGU journal templates using official AGU Word and LaTeX template sources.",
+      "expected_output": "A regression case with AGU official source evidence, normalized LaTeX compiles, PDF comparison outputs, and strict layered grading.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest.json"
+      ],
+      "expectations": [
+        "The AGU submission checklist is captured.",
+        "The runner records official AGU Word and LaTeX template links.",
+        "The official AGU LaTeX project compiles with the regression body or the blocker is explicit.",
+        "The case is not passed unless the generated PDF and official PDF meet the layered comparison gate."
+      ]
+    },
+    {
+      "id": 11,
+      "name": "cambridge-data-policy-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Cambridge Data & Policy Word and LaTeX article templates.",
+      "expected_output": "A batch-2 regression case with Cambridge source evidence, downloaded Word and LaTeX templates, normalized compiles, and PDF comparison artifacts.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The Cambridge preparing-your-materials page is captured.",
+        "The official Word and LaTeX template downloads are hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 12,
+      "name": "copernicus-publications-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the Copernicus Publications Word template and LaTeX package.",
+      "expected_output": "A regression case with Copernicus source pages, downloaded official templates, compile reports, and PDF diff previews.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The Copernicus manuscript preparation page is captured.",
+        "The Word template and LaTeX package are downloaded from Copernicus.",
+        "The template.tex-style official project is normalized with the fixed regression body."
+      ]
+    },
+    {
+      "id": 13,
+      "name": "interpore-journal-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for InterPore Journal using its official Word main manuscript template and LaTeX package.",
+      "expected_output": "A regression case with InterPore source evidence, both official template downloads, local compile reports, and visual diff metrics.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The InterPore templates page is captured.",
+        "The official Word main manuscript template and LaTeX package are hashed.",
+        "LuaLaTeX-recommended templates are still compared under the same normalized manuscript standard."
+      ]
+    },
+    {
+      "id": 14,
+      "name": "sv-jme-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the SV-JME Article Template (word) and Article Template (Latex).",
+      "expected_output": "A regression case with SV-JME source evidence, downloaded DOCX and Overleaf ZIP templates, normalized PDFs, and comparison reports.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The SV-JME guide for authors page is captured.",
+        "The Article Template Word and LaTeX links are downloaded.",
+        "The case records whether the official ZIP can be compiled offline."
+      ]
+    },
+    {
+      "id": 15,
+      "name": "techscience-cmes-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for Tech Science Press CMES templates, including its legacy .dot Word source.",
+      "expected_output": "A regression case with CMES source evidence, .dot Word template handling, official LaTeX ZIP extraction, and strict PDF comparison results.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The CMES instructions page is captured.",
+        "The runner accepts the official .dot Word template as a Word source.",
+        "The LaTeX package is extracted and either compiled or marked with an explicit blocker."
+      ]
+    },
+    {
+      "id": 16,
+      "name": "openwork-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for openwork using its official Word and LaTeX article templates.",
+      "expected_output": "A regression case with Columbia openwork source evidence, both official template downloads, normalized compiles, and diff previews.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The openwork submission page is captured.",
+        "The Article Template - Word and Article Template - LaTeX downloads are hashed.",
+        "The generated LaTeX PDF is compared against the official LaTeX PDF."
+      ]
+    },
+    {
+      "id": 17,
+      "name": "jscda-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for JSCDA using its Microsoft Word and LaTeX templates.",
+      "expected_output": "A regression case with JSCDA source evidence, downloaded DOCX and LaTeX package, compile reports, and visual diff metrics.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The JSCDA submissions page is captured.",
+        "The Microsoft Word template and LaTeX template are downloaded.",
+        "The result is not passed unless required zones are present in both PDFs."
+      ]
+    },
+    {
+      "id": 18,
+      "name": "ijes-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for International Journal of Economic Sciences using its Word and LaTeX templates.",
+      "expected_output": "A regression case with IJES source evidence, official template downloads, normalized PDFs, and strict comparison outputs.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The IJES submissions page is captured.",
+        "The IJES DOCX and ZIP template files are downloaded and hashed.",
+        "Any mismatch is reported by page geometry, required zone, and visual diff category."
+      ]
+    },
+    {
+      "id": 19,
+      "name": "maple-transactions-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for Maple Transactions using its MS Word and LaTeX template downloads.",
+      "expected_output": "A regression case with Maple Transactions source evidence, official Word and LaTeX downloads, compile reports, and comparison artifacts.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The Maple Transactions submissions page is captured.",
+        "The MS Word template and LaTeX ZIP/template are downloaded and hashed.",
+        "The official LaTeX template is normalized before comparison."
+      ]
+    },
+    {
+      "id": 20,
+      "name": "jenrs-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for JENRS using its combined Word and LaTeX template ZIP.",
+      "expected_output": "A regression case that extracts Word sources from the combined official package, compiles the official LaTeX side, and compares PDFs.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch2.json"
+      ],
+      "expectations": [
+        "The JENRS authors page is captured.",
+        "The combined Word & Latex ZIP is downloaded and hashed.",
+        "The runner extracts Word-compatible sources from combined packages before Temp2TeX generation."
+      ]
+    },
+    {
+      "id": 21,
+      "name": "jcmm-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for JCMM using its official Word and LaTeX manuscript templates.",
+      "expected_output": "A batch-3 regression case with JCMM source evidence, downloaded Word and LaTeX templates, normalized PDFs when possible, and strict grading.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 22,
+      "name": "baltzer-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for Baltzer journal article Word and LaTeX packages.",
+      "expected_output": "A batch-3 regression case with Baltzer ZIP source evidence, extracted Word-compatible sources, official LaTeX compilation, and comparison artifacts.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 23,
+      "name": "imaging-jpi-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for the IS&T Journal of Perceptual Imaging Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with JPI official source evidence, downloaded DOCX and ZIP templates, compile reports, and PDF diff previews.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 24,
+      "name": "kjar-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for KJAR using its official Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with KJAR official source evidence, template downloads, normalized compiles, and visual diff metrics.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 25,
+      "name": "tib-open-publishing-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for TIB Open Publishing using its official Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with TIB source evidence, TLS-fallback download reports where needed, normalized PDFs, and comparison artifacts.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 26,
+      "name": "ijaicet-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for IJAICET using its official Word and LaTeX manuscript templates.",
+      "expected_output": "A batch-3 regression case with IJAICET source evidence, downloaded templates, compile reports, and PDF comparison outputs.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 27,
+      "name": "aci-avances-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for ACI Avances en Ciencias e Ingenierias using its official Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with ACI Avances source evidence, downloaded template packages, normalized compiles, and PDF diff previews.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 28,
+      "name": "icck-tcep-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for ICCK Transactions on Clean Energy and Policy using its official first-party Word and LaTeX template links.",
+      "expected_output": "A batch-3 regression case with ICCK source evidence, official Word and LaTeX template downloads, compile reports, and comparison outputs.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 29,
+      "name": "pphmj-fejds-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for Far East Journal of Dynamical Systems using its official Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with FEJDS source evidence, Word DOC and LaTeX TEX downloads, normalized compiles, and PDF comparison artifacts.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 30,
+      "name": "pphmj-jphmt-official-latex-regression",
+      "prompt": "Run the Temp2TeX official-LaTeX regression for JP Journal of Heat and Mass Transfer using its official Word and LaTeX templates.",
+      "expected_output": "A batch-3 regression case with JPHMT source evidence, downloaded Word and LaTeX templates, normalized compiles, and visual diff metrics.",
+      "files": [
+        "F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch3.json"
+      ],
+      "expectations": [
+        "The official source page is captured.",
+        "The official Word and LaTeX templates are downloaded and hashed.",
+        "The case is not passed unless both normalized PDFs compile and meet the layered PDF gate."
+      ]
+    },
+    {
+      "id": 31,
+      "name": "aip-npe-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the AIP Nanotechnology and Precision Engineering Word author template.",
+      "expected_output": "A batch-4 case using the official DOCX render as the reference when no offline official LaTeX package is available.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official DOCX payload is validated, hashed, and rendered.",
+        "Missing official LaTeX selects word_render_fallback rather than not_comparable.",
+        "The generated .cls package compiles before PDF comparison."
+      ]
+    },
+    {
+      "id": 32,
+      "name": "peerj-research-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the official PeerJ research manuscript Word template.",
+      "expected_output": "A batch-4 Word-render fallback case with source provenance, generated class package, and PDF diagnostics.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official PeerJ DOCX is downloaded and hashed.",
+        "The Word PDF remains the reference if the Overleaf source cannot be exported offline.",
+        "Required manuscript zones are checked in the generated PDF."
+      ]
+    },
+    {
+      "id": 33,
+      "name": "asme-journals-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the official ASME journal manuscript Word template.",
+      "expected_output": "A batch-4 ASME case that reconstructs a class from the official DOCX and compares it with the Word render.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official ASME journal DOCX is validated and rendered.",
+        "Publisher-specific front matter and heading evidence are recorded.",
+        "The case does not require an official LaTeX package to be comparable."
+      ]
+    },
+    {
+      "id": 34,
+      "name": "acs-dotx-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the official ACS Word DOTX template.",
+      "expected_output": "A batch-4 case exercising OpenXML DOTX inspection, rendering, class generation, and PDF comparison.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "DOTX is accepted as a Word template payload rather than rejected by extension.",
+        "The selected source hash and rendered PDF are recorded.",
+        "The output architecture is journal-template.cls plus main.tex."
+      ]
+    },
+    {
+      "id": 35,
+      "name": "iospress-jifs-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the IOS Press JIFS Word and LaTeX template archives.",
+      "expected_output": "A batch-4 paired-template case with archive extraction, normalized compiles, and layered PDF comparison.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official Word archive yields a valid Word artifact.",
+        "The official LaTeX archive is retained when accessible and locally compilable.",
+        "Strict PDF gates are not relaxed for the legacy package."
+      ]
+    },
+    {
+      "id": 36,
+      "name": "jmir-word-only-regression",
+      "prompt": "Run the Temp2TeX regression for JMIR's official Word template, respecting JMIR's lack of an official LaTeX template.",
+      "expected_output": "A deliberate Word-render fallback case with no fabricated official LaTeX golden.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official JMIR DOCX is validated, hashed, and rendered.",
+        "The report does not claim that an official LaTeX template exists.",
+        "The generated LaTeX PDF is compared with the Word reference PDF."
+      ]
+    },
+    {
+      "id": 37,
+      "name": "sacj-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the South African Computer Journal Word and complete LaTeX templates.",
+      "expected_output": "A batch-4 paired-template case covering a journal class, numeric references, and single-column layout.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official SACJ DOCX and LaTeX ZIP are sourced from the journal author page.",
+        "The official class is preserved for the golden build.",
+        "The generated class is compared under the same normalized body."
+      ]
+    },
+    {
+      "id": 38,
+      "name": "intechopen-word-only-regression",
+      "prompt": "Run the Temp2TeX regression for the official IntechOpen journal article Word template.",
+      "expected_output": "A batch-4 Word-render fallback case that does not invent an IntechOpen LaTeX source.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official IntechOpen DOCX is rendered successfully.",
+        "No official-LaTeX strict-pass claim is made.",
+        "The output class remains editable and evidence-backed."
+      ]
+    },
+    {
+      "id": 39,
+      "name": "sas-geographical-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the current Geographical Journal Word template.",
+      "expected_output": "A batch-4 current-version Word-render fallback with template date provenance and PDF diagnostics.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The current official DOCX version is downloaded and hashed.",
+        "The Word reference renders before LaTeX comparison.",
+        "Fallback status is explicit when official LaTeX is absent."
+      ]
+    },
+    {
+      "id": 40,
+      "name": "edp-rdne-word-render-regression",
+      "prompt": "Run the Temp2TeX regression for the EDP Sciences RDNE Word template.",
+      "expected_output": "A batch-4 journal-specific Word-render case with generated class and strict structural checks.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch4.json"],
+      "expectations": [
+        "The official EDP DOCX is validated and rendered.",
+        "The generated PDF contains all required zones.",
+        "Visual differences are reported without lowering the hard gates."
+      ]
+    },
+    {
+      "id": 41,
+      "name": "josis-legacy-doc-regression",
+      "prompt": "Run the Temp2TeX regression for JOSIS using its official legacy DOC and LaTeX template evidence.",
+      "expected_output": "A batch-5 case exercising legacy DOC conversion and official LaTeX comparison when exportable.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The legacy DOC payload is recognized and rendered through LibreOffice.",
+        "The Overleaf source is used only when it can be exported or downloaded.",
+        "The reference mode is recorded accurately."
+      ]
+    },
+    {
+      "id": 42,
+      "name": "computing-informatics-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for Computing and Informatics Word and LaTeX templates.",
+      "expected_output": "A batch-5 paired-template case with official artifacts, normalized builds, and PDF diff outputs.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "Both official template artifacts are hashed when accessible.",
+        "The non-standard LaTeX style archive is normalized without replacing its format logic.",
+        "The same stress body drives both PDFs."
+      ]
+    },
+    {
+      "id": 43,
+      "name": "measurement-science-review-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for Measurement Science Review Word and LaTeX templates.",
+      "expected_output": "A batch-5 two-column paired-template case with geometry and typography diagnostics.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The official Word and LaTeX downloads are validated.",
+        "Two-column geometry and page size are checked before visual tuning.",
+        "Required zones and page-count equality remain hard gates."
+      ]
+    },
+    {
+      "id": 44,
+      "name": "jise-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the JISE Word and LaTeX template downloads.",
+      "expected_output": "A batch-5 paired-template case with source hashes, normalized compiles, and visual diff previews.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The direct official DOCX and ZIP are downloaded from JISE.",
+        "Official and generated templates receive the same normalized manuscript.",
+        "Compile blockers are recorded rather than hidden."
+      ]
+    },
+    {
+      "id": 45,
+      "name": "river-journals-dotx-regression",
+      "prompt": "Run the Temp2TeX regression for the River Publishers journal DOTX and LaTeX style archive.",
+      "expected_output": "A batch-5 paired publisher-template case covering DOTX extraction and style-file normalization.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The official DOTX payload is validated, hashed, and rendered.",
+        "The official LaTeX archive is used as golden evidence when compilable.",
+        "The generated class package remains the Temp2TeX output."
+      ]
+    },
+    {
+      "id": 46,
+      "name": "physics-education-india-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the Journal of Physics Education Word and LaTeX templates.",
+      "expected_output": "A batch-5 paired-template case with version provenance and strict PDF comparison.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The current official Word and LaTeX downloads are hashed.",
+        "Version provenance is retained in the source manifest.",
+        "The comparison mode reflects actual official-LaTeX availability."
+      ]
+    },
+    {
+      "id": 47,
+      "name": "ksii-tiis-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the KSII TIIS Word and LaTeX template packages.",
+      "expected_output": "A batch-5 paired-template case using first-party CDN artifacts and layered PDF grading.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "Both first-party CDN artifacts are payload-validated and hashed.",
+        "The official LaTeX package is normalized with the fixed body.",
+        "Page geometry and structural zones are checked before visual thresholds."
+      ]
+    },
+    {
+      "id": 48,
+      "name": "ledger-journal-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for the Ledger journal Word and official Overleaf template.",
+      "expected_output": "A batch-5 case with a rendered Word reference and official-LaTeX golden when the Overleaf project is exportable.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The official Word source is validated and rendered.",
+        "Overleaf is not treated as an offline source unless export succeeds.",
+        "The selected fallback or strict mode is explicit."
+      ]
+    },
+    {
+      "id": 49,
+      "name": "apjse-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for APJSE using its prescribed Word and LaTeX templates.",
+      "expected_output": "A batch-5 paired-template case with official OJS downloads, normalized PDFs, and comparison reports.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The official OJS Word and LaTeX downloads are validated.",
+        "The official class or style is retained for the golden build.",
+        "Strict layered grading determines the result."
+      ]
+    },
+    {
+      "id": 50,
+      "name": "pane-journal-physics-official-latex-regression",
+      "prompt": "Run the Temp2TeX regression for PANE Journal of Physics Word and LaTeX templates.",
+      "expected_output": "A batch-5 physics-template case covering Roman headings, appendix numbering, and PDF comparison.",
+      "files": ["F:/document/doc2tex/temp2tex-regression-corpus/manifest_batch5.json"],
+      "expectations": [
+        "The official Word and LaTeX artifacts are validated and hashed.",
+        "Roman section labels and appendix numbering are checked as structural evidence.",
+        "The case fails when required zones or page geometry diverge."
+      ]
+    },
+    {
+      "id": 107,
+      "name": "skill-behavior-style-inheritance-and-render-calibration",
+      "prompt": "Convert an official journal DOCX whose body style inherits its font and spacing through basedOn. A rendered Word comparison measures 10pt text even though the source style declares 11pt. Produce an editable LaTeX package and explain the evidence decision.",
+      "expected_output": "A class-based LaTeX package that preserves source evidence separately from an optional render-verified calibration.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md", "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"],
+      "expectations": [
+        "The agent resolves document defaults, basedOn styles, and direct formatting before using a fallback.",
+        "The Word 11pt source evidence remains in document.font_size_pt.",
+        "A 10pt output size is used only under document.render_calibration with render_verified status and recorded comparison evidence.",
+        "The agent does not copy an Abstract or reference paragraph's direct formatting onto body text merely because it is a long sample.",
+        "The output remains journal-template.cls plus main.tex with a gap log and verification status."
+      ]
+    },
+    {
+      "id": 108,
+      "name": "skill-behavior-frontmatter-word-default-alignment",
+      "prompt": "Convert a journal DOCX whose title and author styles have no Word jc property, while a second template explicitly has jc=center. Explain and implement the class alignment decisions.",
+      "expected_output": "Two evidence-backed front-matter alignment decisions in editable class packages.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md", "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"],
+      "expectations": [
+        "A source-backed title or author role without jc is left aligned, matching Word's paragraph default.",
+        "A role with jc=center remains centred.",
+        "The agent does not use a global centre alignment merely because it is common in article templates.",
+        "The output remains a journal-template.cls plus main.tex package with source evidence and gaps recorded."
+      ]
+    },
+    {
+      "id": 109,
+      "name": "skill-behavior-table-figure-layout-evidence",
+      "prompt": "Convert a journal DOCX containing a fixed-width centered merged-cell table and inline body figures with measured dimensions. Produce the LaTeX package without claiming that one sample width applies to every table or figure.",
+      "expected_output": "A class-based package with editable table/figure helpers, structured layout evidence, copied assets, and explicit rendered-verification gaps.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent records table grid widths, fixed/autofit mode, alignment, and merged-cell evidence.",
+        "The agent records figure drawing type, dimensions, and alignment candidates while retaining media under assets.",
+        "The class exposes editable journaltable and journalfigure interfaces.",
+        "The agent does not hard-code a sample table or figure width as a universal rule without render verification."
+      ]
+    },
+    {
+      "id": 110,
+      "name": "skill-behavior-footnote-evidence-boundary",
+      "prompt": "Convert a journal DOCX whose footnotes.xml contains separator nodes but no visible footnote text, while its author guide mentions author notes. Produce the LaTeX package and explain what can and cannot be reproduced.",
+      "expected_output": "An editable package that preserves standard LaTeX footnotes and records the missing source evidence rather than inventing a marker or separator style.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent distinguishes Word separator/continuation nodes from visible footnote paragraph evidence.",
+        "footnotes.enabled is set only when usable visible style evidence exists.",
+        "The package remains compilable and exposes ordinary LaTeX footnotes or author notes.",
+        "format_gap_log.md identifies marker sequence, separator, and font verification as pending."
+      ]
+    },
+    {
+      "id": 111,
+      "name": "skill-behavior-reference-indent-and-appendix-numbering",
+      "prompt": "Convert a journal DOCX with a source-backed reference left indent and appendices requiring Eq. (A.1), Table A.1, and Fig. A.1. Produce an editable LaTeX package.",
+      "expected_output": "A class package with source-backed bibliography handling, explicit appendix interface, and unresolved backend-dependent gaps documented.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent maps a fixed Word reference left indent only when the LaTeX bibliography backend can express it.",
+        "The agent does not invent a hanging indent without label-width/render evidence.",
+        "The class exposes an appendix command that resets equation, table, and figure labels to the source numbering scheme.",
+        "The output records backend and appendix verification requirements in the gap log or README."
+      ]
+    },
+    {
+      "id": 112,
+      "name": "skill-behavior-cover-candidate-boundary",
+      "prompt": "Convert an official Word journal template whose first section has titlePg and a first-page header logo, but whose rendered sample may use it as title-page furniture rather than a standalone cover.",
+      "expected_output": "A class package with a cover candidate record and editable cover environment, without an invented automatic cover page.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent records candidate_first_page_variant evidence rather than claiming a cover is required.",
+        "The class exposes an editable journalcover interface.",
+        "main.tex does not automatically insert a standalone cover without rendered confirmation.",
+        "The README or gap log names the first-page rendering check."
+      ]
+    },
+    {
+      "id": 113,
+      "name": "skill-behavior-word-toc-field-detection",
+      "prompt": "Convert two journal DOCX templates: one contains a Word TOC field and the other contains only a paragraph headed Contents. Produce editable LaTeX packages and explain the different decisions.",
+      "expected_output": "Evidence-backed TOC handling without falsely adding a table of contents to a heading-only template.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent detects instrText or fldSimple TOC evidence.",
+        "The field-backed package enables tableofcontents and documents a second compile pass.",
+        "The heading-only package records a pending visual check without automatically generating a TOC.",
+        "Both outputs remain editable class-based LaTeX packages."
+      ]
+    },
+    {
+      "id": 114,
+      "name": "skill-behavior-frontmatter-role-and-inline-flow",
+      "prompt": "Convert an official journal DOCX. Its named styles include Paper Title, Table Title, a dated publication notice, a one-paragraph author line, an inline body figure, and an anchored body figure. Build an editable LaTeX package and state which evidence is pending render confirmation.",
+      "expected_output": "An evidence-backed .cls plus main.tex package that selects manuscript roles correctly and exposes source-backed inline/float behavior without pretending every candidate is visually verified.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md", "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent selects Paper Title rather than Table Title for the article title role and records an unused named title style as a template-style candidate when no visible title exemplar exists.",
+        "The agent does not treat a dated publication notice merely because it contains commas as author evidence; it selects the visible author-like paragraph or records the gap.",
+        "A one-paragraph Word author exemplar produces an editable inline author layout, while missing or multi-cell evidence does not force that decision.",
+        "The class retains inline versus anchored Word drawing state as evidence but keeps journalfigure float-capable by default; it uses a non-floating figure policy only after rendered comparison verifies that placement rule.",
+        "The agent preserves source RGB colour as a source-backed role property only when the Word style/run supplies a concrete RGB value, and does not invent a colour from a theme or screenshot.",
+        "If PDF diagnostics show a large text-box displacement, the agent fixes structural flow before proposing page-margin calibration; any calibration remains pending until an improved same-content comparison verifies it."
+      ]
+    },
+    {
+      "id": 115,
+      "name": "skill-behavior-reference-evidence-and-large-page-frame",
+      "prompt": "Convert an official Word journal template. It has a visible References entry beginning [1], a bibliography paragraph style with 18pt left indent, an unrelated body sentence containing et al., and a 50mm bottom Word margin. Deliver an editable LaTeX package with an evidence ledger and gap log.",
+      "expected_output": "A package that preserves numbered-reference evidence and reference-entry formatting, while treating the unusual page frame as a pending render-check issue rather than an automatically corrected margin.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent selects numeric citation mode from the visible [1] Word reference evidence and records that source in template_spec.json.",
+        "The agent does not infer author-year merely from an unrelated et al. phrase.",
+        "The reference-entry paragraph style is applied or recorded as source evidence; it is not discarded merely because its name contains References or Bibliography.",
+        "The generated format_gap_log.md records any default or unverified citation-system choice rather than leaving it only in the spec.",
+        "The agent preserves the 50mm Word bottom margin as source evidence but records page-frame uncertainty and requires same-content PDF verification before render calibration can override it.",
+        "The final deliverable remains an editable journal-template.cls plus main.tex package and does not claim visual equivalence without a render comparison."
+      ]
+    },
+    {
+      "id": 116,
+      "name": "skill-behavior-header-footer-candidate-selection",
+      "prompt": "Convert an official journal DOCX whose active footer stores a red provisional notice in one paragraph and a PAGE field in a later right-aligned paragraph. The official LaTeX template used as the comparison golden has no provisional footer. Deliver an editable package and state the verification decision.",
+      "expected_output": "A class-based package that preserves the source footer as editable candidate commands but does not force it into the selected page style when the same-content official-LaTeX comparison rejects it.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent inspects every tokenized active footer paragraph instead of assuming the first paragraph contains usable content.",
+        "The provisional text and PAGE field are preserved separately as editable left and right footer candidates.",
+        "The default class keeps unverified custom page furniture inactive while retaining the evidence in template_spec.json and format_gap_log.md.",
+        "The agent evaluates an explicit candidate against the same comparison target and rejects it when it worsens the official-LaTeX golden comparison.",
+        "The final deliverable remains an editable journal-template.cls plus main.tex package rather than claiming a Word-specific footer is universally required."
+      ]
+    },
+    {
+      "id": 119,
+      "name": "skill-behavior-word-default-single-column-transition",
+      "prompt": "Convert an official Word journal template with three sections. The first section has no w:cols element, while sections two and three explicitly set two columns and contain the manuscript body. Build the editable LaTeX package.",
+      "expected_output": "A class-based package that keeps the title/front matter full width and begins the body in two columns without a forced page break.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md", "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"],
+      "expectations": [
+        "The agent recognizes omitted Word w:cols as the one-column default in a first-section-versus-later-double-column pattern.",
+        "front_matter.body_column_transition_after_front_matter is true and records the section evidence.",
+        "The generated main.tex uses a twocolumn title region rather than globally applying twocolumn before the front matter.",
+        "A one-section document with no w:cols is not incorrectly converted into a transition."
+      ]
+    },
+    {
+      "id": 120,
+      "name": "skill-behavior-pagination-before-margin-calibration",
+      "prompt": "A same-content Word-vs-LaTeX PDF comparison shows only a 6pt horizontal body-box difference. The title and abstract align, but Methods, Table 1, and References are hundreds of points lower or on later pages in the generated PDF. Diagnose and improve the template.",
+      "expected_output": "An evidence-based structural-flow diagnosis and editable package revision plan, without an unsupported margin calibration.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md", "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"],
+      "expectations": [
+        "The agent classifies the primary discrepancy as pagination or structural flow, not page-frame geometry.",
+        "It inspects the front-matter column transition, float placement, caption flow, and forced page breaks before changing margins.",
+        "It preserves Word-derived margins as source evidence and does not mark a page calibration render_verified.",
+        "The output remains an editable journal-template.cls plus main.tex package with the diagnosis recorded in format_gap_log.md or a comparison report."
+      ]
+    },
+    {
+      "id": 121,
+      "name": "skill-behavior-first-page-furniture-boundary",
+      "prompt": "Convert an official Word journal template whose first-page header has a logo and rule, while later pages use a text running head. The XML proves both variants but no rendered reference is available yet.",
+      "expected_output": "An editable class package that keeps first-page and later-page furniture separate and records their pending verification.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md", "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"],
+      "expectations": [
+        "The agent extracts and preserves both active variants and related assets in the evidence ledger.",
+        "The class exposes separate journalfirstpageheader/footer commands and a distinct first-page page style.",
+        "The agent does not activate the logo/rule or copy it to later pages without a rendered same-content comparison.",
+        "format_gap_log.md records the first-page placement and visibility check, while the package remains compileable and editable."
+      ]
+    },
+    {
+      "id": 122,
+      "name": "skill-regression-official-engine-and-required-metadata",
+      "prompt": "Run an official Word-vs-LaTeX regression where the publisher's official class contains a PDFTeX-only primitive and requires a DOI plus an end-of-document marker. The generated Temp2TeX package remains XeLaTeX-safe.",
+      "expected_output": "A strict official-LaTeX regression that preserves separate engine decisions and class-specific normalized metadata.",
+      "files": ["C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"],
+      "expectations": [
+        "The official golden is compiled with its compatible engine rather than forcing the generated package's engine onto it.",
+        "A manifest engine failure and any compatible-engine retry are retained as separate evidence.",
+        "Required official-class DOI or end markers are supplied only in the normalized official regression adapter, not added to journal-template.cls as a general rule.",
+        "The case uses official-LaTeX comparison only when the retried golden actually compiles; otherwise it records a justified fallback or not_comparable status."
+      ]
+    },
+    {
+      "id": 123,
+      "name": "skill-behavior-word-line-spacing-evidence-boundary",
+      "prompt": "Convert an official Word journal template whose selected body style is 11pt with Word automatic line spacing 276, while a separate quotation style uses exact 18pt line spacing. Deliver an editable package and a verification plan.",
+      "expected_output": "A class-based package that keeps automatic Word spacing as a relative line-spacing rule, maps only the exact style to a physical baseline candidate, and documents density verification.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent preserves automatic Word body spacing as a relative initial LaTeX line-spacing setting rather than converting it into a universal physical baseline.",
+        "The agent maps the exact 18pt evidence to an editable physical baseline candidate without treating the unrelated quotation style as the main body style.",
+        "template_spec.json retains the original Word line metric and distinguishes source evidence from render verification.",
+        "format_gap_log.md or README.md requires a same-content PDF density check before any automatic-spacing calibration is marked verified.",
+        "The result remains an editable journal-template.cls plus main.tex package."
+      ]
+    },
+    {
+      "id": 124,
+      "name": "skill-regression-source-font-candidate",
+      "prompt": "Run an explicit Word-vs-LaTeX regression. The selected Word body style names Arial, but the ordinary Temp2TeX package uses a conservative fallback because font metrics are unverified. Evaluate whether the source font should be adopted.",
+      "expected_output": "A narrow base-versus-source-font comparison that preserves compile safety and promotes the source font only if the same-content PDF result selects it.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "The agent keeps the ordinary package editable and does not claim a Word font name is render-verified before comparison.",
+        "The regression compares only the base package and a source-font candidate, rather than running unrelated density variants.",
+        "The candidate uses an installed-font guard so a missing source font does not make the package uncompilable.",
+        "The source font is retained only when the same-content comparison selects it; a worse candidate is recorded as rejected evidence.",
+        "The case report records the decision separately from any publisher-specific class or page-style changes."
+      ]
+    },
+    {
+      "id": 125,
+      "name": "skill-behavior-front-matter-boundary-spacing",
+      "prompt": "Convert an official journal DOCX whose title style has 6pt space after, author style has direct 14pt space before, affiliation style has no explicit before spacing, and abstract style has direct 10pt space before. Produce an editable LaTeX package.",
+      "expected_output": "A source-backed .cls plus main.tex package that maps each visible front-matter boundary once, while retaining an evidence ledger and visual verification plan.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The title-to-author LaTeX skip uses the author's explicit 14pt space-before evidence rather than adding it to the title's 6pt space-after.",
+        "The author-to-affiliation boundary falls back to the author style's after spacing when the affiliation has no explicit before spacing.",
+        "The affiliation-to-abstract Word spacing is retained as an evidence candidate; it does not override the class's post-maketitle structural gap without same-content PDF confirmation.",
+        "The package does not promote generic inherited Normal-style paragraph spacing to a journal-specific front-matter rule without evidence.",
+        "template_spec.json, format_gap_log.md, and the editable journal-template.cls preserve the source-versus-verification distinction."
+      ]
+    },
+    {
+      "id": 126,
+      "name": "skill-behavior-source-geometry-fixture",
+      "prompt": "Convert an official Word journal template containing a fixed-width four-column table with Word grid widths 40%, 30%, 15%, and 15%, merged cells, top and bottom rules, and an inline body figure with a measured width and height. Deliver an editable LaTeX package.",
+      "expected_output": "A compileable class-based package whose representative main.tex table and figure actually exercise the extracted geometry without treating it as a universal rule for unrelated content.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "template_spec.json records the source table width, four grid columns, merged-cell evidence, border profile, and figure dimensions.",
+        "journal-template.cls exposes editable representative width and column helpers.",
+        "main.tex contains a compileable four-column fixture using the extracted proportions and a merged-cell example, rather than a fixed three-column placeholder.",
+        "The figure fixture uses source-derived representative width and height while journalfigure remains float-capable unless rendered evidence verifies non-floating placement.",
+        "The package records representative geometry as source-backed and requires a render check before applying it as a universal table or figure policy."
+      ]
+    },
+    {
+      "id": 127,
+      "name": "skill-behavior-reference-hanging-indent",
+      "prompt": "Convert an official Word journal template with visible numeric reference entries. The Word reference style uses 9pt italic text, 18pt left indent, 18pt hanging indent, and 4pt space after each entry. Produce an editable LaTeX package.",
+      "expected_output": "A compileable class-based package that maps source-backed reference typography and list geometry while preserving backend and label-width verification boundaries.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent uses the visible numeric entries as citation-style evidence and keeps the reference-entry role distinct from body style evidence.",
+        "journal-template.cls applies the reference font while retaining the 18pt continuation inset as a standard bibliography list-layout candidate.",
+        "An explicit same-content probe may map the 18pt hanging evidence to a negative bibliography item indent and the 4pt after spacing to bibliography item spacing; ordinary delivery keeps those layout settings inactive until selected.",
+        "The package does not claim label-width-perfect output or enable list geometry without a rendered same-content comparison.",
+        "main.tex includes a compileable reference fixture and format_gap_log.md records any backend-specific limits."
+      ]
+    },
+    {
+      "id": 128,
+      "name": "skill-behavior-heading-colour-alignment",
+      "prompt": "Convert an official Word journal template where Heading 1 is 14pt bold teal, Heading 2 is 12pt italic blue, and Heading 3 is 11pt black. A used Heading 1 paragraph is centered; the other levels are left aligned. Deliver an editable LaTeX package.",
+      "expected_output": "A compileable .cls plus main.tex package that maps each source-backed heading level without inventing theme colours or changing unrelated body paragraphs.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent preserves Word outline-level evidence and maps the first three levels to section, subsection, and subsubsection controls.",
+        "journal-template.cls maps Heading 1's bold 14pt size and centered alignment, while retaining its concrete teal as a render candidate.",
+        "A same-content colour probe may enable Heading 1 teal and Heading 2 blue only when it improves the comparison; Heading 3 remains black without decorative colour.",
+        "Heading indentation and before/after spacing remain source-backed and editable.",
+        "main.tex exercises each mapped heading level and the package records any visual verification still needed."
+      ]
+    },
+    {
+      "id": 129,
+      "name": "skill-behavior-appendix-section-counters",
+      "prompt": "Convert an official journal Word template whose appendix guidance requires Appendix A/B sections, equations displayed as (A.1)/(B.1), and tables and figures labeled Table A.1/Figure A.1. Deliver an editable LaTeX template package.",
+      "expected_output": "A compileable class-based package with a named appendix command and exercised, section-bound appendix counters.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "journal-template.cls exposes journalappendix rather than requiring the user to assemble counter resets manually.",
+        "The appendix command binds equation, table, and figure counters to the appendix section so each new appendix restarts at 1.",
+        "main.tex exercises an appendix equation, table, and figure, not merely an Appendix heading.",
+        "A second appendix section can compile with (B.1) rather than continuing the first appendix's equation counter.",
+        "The package records incomplete official appendix evidence as a default or render-verification gap instead of claiming an unsupported numbering scheme."
+      ]
+    },
+    {
+      "id": 130,
+      "name": "skill-behavior-mixed-cjk-bilingual-abstracts",
+      "prompt": "Convert an official Chinese-first bilingual Word journal template. It has a Chinese title page, a Chinese section headed 摘要 followed by Chinese keywords, then an English title page and an English section headed Abstract followed by English keywords, before the numbered Introduction. Deliver an editable LaTeX package.",
+      "expected_output": "A compileable XeLaTeX class-based package that preserves separate bilingual front matter and begins the numbered body at Introduction rather than at either abstract heading.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md"
+      ],
+      "expectations": [
+        "The agent classifies the source as mixed from visible text and uses a CJK-safe XeLaTeX class.",
+        "template_spec.json retains distinct Chinese primary-abstract and English-abstract evidence rather than overwriting one with the other.",
+        "main.tex exposes editable Chinese and English title, author, affiliation, abstract, and keyword fields in the visible source order.",
+        "Neither 摘要 nor Abstract is emitted as a numbered body section, and the first numbered body section is Introduction.",
+        "A named Word East Asian font is treated as evidence-only until it is available locally and a rendered comparison supports enabling it."
+      ]
+    },
+    {
+      "id": 131,
+      "name": "skill-behavior-macro-enabled-word-template",
+      "prompt": "Convert an official journal author template supplied as a macro-enabled Word .docm file. The document body, styles, headers, footers, and embedded figures are OpenXML content; any macros are unrelated submission helpers. Deliver an editable LaTeX template package.",
+      "expected_output": "A class-based LaTeX package reconstructed from the document evidence, without requiring the agent to execute Word macros.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent treats .docm as an OpenXML Word source when its package structure is valid and does not reject it merely because it is macro-enabled.",
+        "The agent never executes Word macros; it extracts visible document, style, header/footer, and asset evidence only.",
+        "The ordinary output contract remains main.tex, journal-template.cls, references.bib, figures, assets, template_spec.json, format_gap_log.md, and README.md.",
+        "If the .docm payload is malformed or cannot be inspected, the agent records the unavailable evidence and follows the documented default and verification path rather than fabricating source rules."
+      ]
+    },
+    {
+      "id": 132,
+      "name": "skill-behavior-word-textbox-evidence",
+      "prompt": "Convert an official Word journal template whose cover carries the journal name and a decorative submission label in floating VML/DrawingML text boxes, while the manuscript body starts with an ordinary Introduction paragraph. Deliver an editable LaTeX package.",
+      "expected_output": "A package that preserves the text-box content as explicit cover/first-page evidence without accidentally treating it as manuscript body content.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The evidence ledger distinguishes non-flow text-box text from normal Word paragraph flow and names its source part.",
+        "The agent does not emit the journal name or decorative label as a numbered section or ordinary manuscript paragraph.",
+        "The class exposes a first-page or cover hook only when applicable; exact textbox coordinates remain a rendered-comparison candidate.",
+        "When source rendering is unavailable, format_gap_log.md explicitly marks text-box placement as unverified instead of inventing absolute coordinates.",
+        "main.tex still contains a normal editable article fixture beginning with the first real body section."
+      ]
+    },
+    {
+      "id": 133,
+      "name": "skill-behavior-column-evidence-precedence",
+      "prompt": "Convert an official journal Word template with one active Word section whose w:cols property is omitted, while the publisher web page also says an older two-column template remains available. Deliver an editable LaTeX template package.",
+      "expected_output": "A one-column package derived from the supplied template's active Word geometry, with the historical web-page statement retained only as conflicting context.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent recognizes omitted w:cols in an active Word section as the Word one-column default.",
+        "The agent does not let a broad page mention of alternative, historical, or peer-review-specific templates override the supplied Word source.",
+        "template_spec.json records the active section as the selected column evidence and records the conflicting page statement when material.",
+        "The generated class uses one-column geometry and does not introduce an unsupported twocolumn transition.",
+        "Only in the absence of usable Word section geometry may an explicit directive scoped to the current manuscript supply column evidence."
+      ]
+    },
+    {
+      "id": 134,
+      "name": "skill-behavior-word-omml-equations",
+      "prompt": "Convert an official Word journal template containing Word OMML display equations. One sample is followed by the visible number (1); another is an unnumbered inline expression; the appendix guidance uses (A.1). Deliver an editable LaTeX template package.",
+      "expected_output": "A compileable class-based package that preserves equation numbering evidence and uses an editable amsmath interface without fabricating a lossy OMML-to-LaTeX transcription.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md"
+      ],
+      "expectations": [
+        "template_spec.json records OMML sample count, display/inline context, visible number samples, and any table-cell wrapper evidence.",
+        "journal-template.cls exposes journalequation and uses numbered display math when the visible (1) sample supports it.",
+        "main.tex exercises the named equation interface and its cross-reference rather than only loading amsmath.",
+        "The package does not claim to have converted flattened OMML text into the official mathematical expression; conversion and exact number placement remain explicit verification boundaries.",
+        "journalappendix continues to support section-bound appendix equation counters such as (A.1)."
+      ]
+    },
+    {
+      "id": 135,
+      "name": "skill-behavior-word-numbered-and-nested-lists",
+      "prompt": "Convert an official Word journal template containing visible Word numbering.xml lists: first-level 1./2. items, nested a)/b) items, and a separate bullet list. The source also has a real Heading 1 beginning with 1. Introduction. Deliver an editable LaTeX template package.",
+      "expected_output": "A compileable class-based package with editable list wrappers that preserves list evidence without treating list numbers as article headings.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent reads visible numPr paragraphs together with numbering.xml and records list kind, number format, levels, indent, and hanging evidence in template_spec.json.",
+        "Only the semantic Heading 1 or outline-level paragraph is treated as the Introduction section; numbered list items are excluded from heading inference.",
+        "journal-template.cls exposes journalenumerate and journalitemize with source-backed editable starting values.",
+        "main.tex exercises the applicable wrapper and a nested list when source levels show nesting.",
+        "The package records label width, restart behavior, and exact nested spacing as rendered-verification work rather than claiming exact list fidelity."
+      ]
+    },
+    {
+      "id": 136,
+      "name": "skill-behavior-word-table-header-evidence",
+      "prompt": "Convert an official Word journal template with a small representative table whose first row is bold, pale-blue shaded, vertically centred, fixed-height, and marked as a repeated table header. A separate larger body table has no header styling. Deliver an editable LaTeX template package.",
+      "expected_output": "A compileable class-based package that selects the explicit table-header evidence and exposes editable table header helpers without overclaiming long-table behavior.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "template_spec.json records repeat-header status, fill color, vertical alignment, boldness, and row-height evidence for the selected representative table.",
+        "The explicit formatted header table is preferred over a larger unformatted grid as table-style evidence.",
+        "journal-template.cls exposes named table-header helpers and main.tex uses them in a compileable representative fixture.",
+        "A direct source-backed header fill may be used in the representative row, while multi-page repeated headers and exact vertical cell geometry remain render-verification candidates.",
+        "The package does not force all future tables into a longtable environment."
+      ]
+    },
+    {
+      "id": 137,
+      "name": "skill-behavior-visible-table-and-figure-captions",
+      "prompt": "Convert an official Word journal template with a visible Table 1. caption in 9pt centered text and a visible Fig. 1. caption in 8pt left-aligned italic text. The template also contains generic prose beginning “Tables should…” and a broad Caption style reused elsewhere. Deliver an editable LaTeX package.",
+      "expected_output": "A compileable class-based package whose table and figure caption settings come from the separate visible caption exemplars rather than generic prose or a reused style name.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "template_spec.json records distinct visible table-caption and figure-caption evidence, including their sample text and direct formatting.",
+        "The agent does not select “Tables should…” or “Figure captions…” instructional prose as caption evidence.",
+        "journal-template.cls maps the table and figure caption font/alignment independently through caption configuration.",
+        "When no concrete caption exemplar exists, the package retains a named Caption style only as a template candidate and records the verification gap.",
+        "Float placement is not claimed as matched without same-content rendered comparison."
+      ]
+    },
+    {
+      "id": 138,
+      "name": "skill-behavior-word-footnotes-and-endnotes",
+      "prompt": "Convert an official Word journal template containing a visible 9pt footnote with a hanging indent, two Word endnote separator nodes, and one visible endnote paragraph. Author correspondence uses a separate title-page note. Deliver an editable LaTeX package.",
+      "expected_output": "A compileable class-based package that treats footnotes, endnotes, and author notes as distinct roles and does not infer formatting from Word separator nodes.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md"
+      ],
+      "expectations": [
+        "template_spec.json records real non-negative footnote/endnote counts separately from separator nodes and retains visible style samples only when present.",
+        "The class maps source-backed footnote typography and continuation indentation without claiming the separator rule or marker sequence.",
+        "A visible endnote sample enables journalendnote and printjournalendnotes; separator-only endnotes do not enable them.",
+        "Corresponding-author/title-page notes remain separate from ordinary body footnotes and endnotes.",
+        "main.tex exercises each enabled note interface and the package logs unverified placement or marker behavior."
+      ]
+    },
+    {
+      "id": 139,
+      "name": "skill-behavior-table-cell-text-does-not-pollute-body-or-heading-evidence",
+      "prompt": "Convert an official Word journal template where a one-cell table contains a long 8pt Arial instruction beginning '1. TABLE CELL INSTRUCTION'. The actual article body after a real Heading 1 is 12pt Times New Roman. The table is also used for a title-page metadata block. Deliver an editable LaTeX template package.",
+      "expected_output": "A class-based package whose body and heading rules follow manuscript-flow evidence, while preserving the table as editable table/front-matter evidence.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "The evidence inventory records whether each paragraph occurs in a Word table cell.",
+        "The long 8pt table-cell instruction is not selected as a body style or a textual heading candidate merely because it starts with '1.'.",
+        "The 12pt manuscript-flow paragraph after the semantic Heading 1 supplies body baseline evidence when no stronger used body style exists.",
+        "Table-cell text remains available for table structure and title-page/front-matter reconstruction rather than being discarded.",
+        "The output records any unresolved table positioning as a rendering verification gap instead of promoting table-cell geometry to a global page rule."
+      ]
+    },
+    {
+      "id": 140,
+      "name": "skill-behavior-table-glossary-text-is-not-a-semantic-heading",
+      "prompt": "Convert an ACM-like Word template whose style glossary table contains cells reading 'heading for acknowledgements', 'appendix heading level 1', and 'first paragraph after a heading'. Those cells use the neutral TableCell style; the manuscript has separate real Heading 1 and Heading 2 paragraphs. Deliver an editable LaTeX template package.",
+      "expected_output": "A class-based package whose section scaffold follows real Word heading styles or outline levels and ignores heading words appearing only inside a table-cell instruction glossary.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "Heading semantics are derived from the Word style or outline metadata, not from matching the word 'heading' in paragraph text.",
+        "Table-cell glossary text is retained as source evidence but has no overlap with heading_candidates or generated manuscript sections.",
+        "Real Heading 1/2 paragraphs remain available for the editable section scaffold.",
+        "The package records table-glossary placement as source evidence or a verification gap rather than copying glossary phrases into main.tex."
+      ]
+    },
+    {
+      "id": 141,
+      "name": "skill-behavior-author-layout-uses-sample-cardinality",
+      "prompt": "Convert three official Word templates with these author evidence patterns: (A) one Author List paragraph containing comma-separated names, (B) three separate paragraphs using the same Authors style, and (C) one author paragraph inside a title-page table cell. Deliver editable class-based LaTeX packages.",
+      "expected_output": "The generated specifications and classes preserve inline authors for the single-flow exemplar, use a stacked/tabular author interface for repeated or table-backed author blocks, and retain the source samples for later render verification.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "front_matter.author_style records sample_texts, sample_count, and sample_in_table_cells instead of discarding the selected author exemplars.",
+        "A single non-table author paragraph maps to inline author rendering; multiple same-style author paragraphs map to tabular/stacked rendering.",
+        "An author paragraph in a table cell is treated as table-backed layout evidence and does not silently become ordinary inline flow.",
+        "The exact separator between multiple LaTeX authors remains editable and is recorded as a render-verification detail when the Word sample does not prove the LaTeX punctuation.",
+        "main.tex exercises the selected author interface and the package remains valid under the ordinary package contract."
+      ]
+    },
+    {
+      "id": 142,
+      "name": "skill-behavior-header-footer-text-stays-candidate-until-render-verified",
+      "prompt": "Convert an official Word template whose active default footer contains a PAGE field, while the first-page footer is empty and the Word section uses a different-first-page setting. Deliver an editable LaTeX template package and a verification plan.",
+      "expected_output": "The package preserves the PAGE field in an editable footer slot and records the source geometry, but does not automatically activate the custom page style merely because the XML contains text-only furniture.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "template_spec.json preserves the active default and first-page variants separately, including PAGE field evidence and different_first_page geometry.",
+        "header_footer_auto_apply remains false unless a same-content rendered comparison explicitly verifies the furniture candidate.",
+        "journal-template.cls exposes editable header/footer commands and the source page-distance evidence without silently applying a possibly wrong page style.",
+        "README.md or format_gap_log.md gives the exact candidate-generation and PDF-comparison path needed to enable the furniture later."
+      ]
+    },
+    {
+      "id": 143,
+      "name": "skill-behavior-body-in-layout-table-is-guardedly-admitted",
+      "prompt": "Convert an official Word template whose article body is entirely inside a one-column layout table. It contains a real Heading 1 outside the table, several long 11pt body paragraphs inside the table, and separate table cells containing short instructions and captions. Deliver an editable LaTeX template package.",
+      "expected_output": "The generated specification uses the long body-like table-cell paragraph as body evidence only because no ordinary-flow body exemplar exists, while ignoring the instruction and caption cells.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "The body evidence is marked table_cell_body_exemplar and retains the source paragraph/container context.",
+        "A long table-cell paragraph is not admitted when a credible ordinary-flow body exemplar already exists.",
+        "Short table instructions, captions, front-matter labels, and list items are excluded from body-style selection.",
+        "The resulting class remains a normal editable class package and records the layout-table fallback as an evidence-qualified decision."
+      ]
+    },
+    {
+      "id": 144,
+      "name": "skill-behavior-bibliography-fixture-and-diagnostics-are-explicit",
+      "prompt": "Convert an official Word template whose citation system is not fully specified. Deliver the normal class-based LaTeX package and run the available compiler.",
+      "expected_output": "The package compiles with an editable bibliography fixture, clearly explains how references.bib relates to the default thebibliography backend, and reports final-pass undefined references/citations and overfull boxes in compile_report.json.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "main.tex contains a compileable citation and reference fixture without requiring a publisher-specific BibTeX backend.",
+        "references.bib is present and README.md explains the optional migration to the official .bst or BibLaTeX backend.",
+        "compile_report.json records the final compiler pass, undefined references, undefined citations, overfull-box count, and package warning count.",
+        "The agent does not claim a citation style is official when the Word source and official instructions do not establish it."
+      ]
+    },
+    {
+      "id": 145,
+      "name": "skill-behavior-representative-table-width-does-not-overflow",
+      "prompt": "Convert an official Word template with a fixed-width two-column table whose measured column proportions sum to the usable text width. Generate and compile the editable LaTeX package.",
+      "expected_output": "The representative LaTeX table preserves the measured column proportions without adding an unaccounted inter-column overflow, and the final compile report distinguishes any remaining source-backed layout gap from a generator overflow.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "template_spec.json retains the original Word grid widths and table width evidence.",
+        "The generated representative p-column widths sum to the editable table width without silently adding default tabcolsep overflow.",
+        "The package compiles and compile_report.json records overfull_box_count separately from fatal compiler success.",
+        "The fix does not replace source-backed grid borders or force the same colspec on unrelated future tables."
+      ]
+    },
+    {
+      "id": 146,
+      "name": "skill-behavior-word-instruction-samples-do-not-leak-into-main",
+      "prompt": "Convert an official Word template whose abstract paragraph says 'A single paragraph of about 200 words maximum...' and whose body contains Word help text such as 'Video provides a powerful way to help you prove your point'. Deliver an editable LaTeX template package.",
+      "expected_output": "The package uses neutral editable abstract/body fixtures, while retaining the Word sample and instruction text only as evidence in template_spec.json and format_gap_log.md.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md"
+      ],
+      "expectations": [
+        "main.tex does not contain the Word abstract instruction or generic Word help prose as manuscript content.",
+        "template_spec.json retains source text needed to justify abstract style and body evidence decisions.",
+        "The abstract and bilingual abstract fields remain editable placeholders with source-backed formatting, word-limit, and language decisions.",
+        "The generated package compiles and remains valid without silently claiming that the Word sample text is an author manuscript."
+      ]
+    },
+    {
+      "id": 147,
+      "name": "skill-behavior-grid-table-budget-accounts-for-rules",
+      "prompt": "Convert an official Word template with a full-width grid table whose measured columns use vertical borders. Generate and compile the editable class-based LaTeX package.",
+      "expected_output": "The representative grid table preserves the source column proportions and borders while leaving an explicit width budget for LaTeX rule and inter-column geometry.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The grid colspec suppresses default tabcolsep on both sides of vertical rules.",
+        "Grid p-column widths use a documented sub-100% budget rather than summing blindly to the full table width.",
+        "The generated package preserves grid borders and source column proportions within the stated budget.",
+        "The final compile report records zero overfull boxes for the representative full-width grid fixture.",
+        "The width safeguard is limited to the representative grid fixture and does not rewrite unrelated table structures."
+      ]
+    },
+    {
+      "id": 148,
+      "name": "skill-behavior-two-column-floats-use-local-linewidth",
+      "prompt": "Convert an official double-column Word journal template with representative tables and figures in the manuscript body. Generate and compile the editable class-based LaTeX package.",
+      "expected_output": "Normal table and figure floats fit the active column while preserving measured proportions; the agent does not silently use page-wide textwidth or claim a cross-column span without evidence.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "Ordinary representative table and figure dimensions resolve from local linewidth in a two-column body.",
+        "The generated package compiles without representative-float overfull boxes.",
+        "Full-width table* or figure* output is only selected when source evidence establishes a cross-column span.",
+        "The package remains editable and records the local-width decision in its evidence/gap documentation."
+      ]
+    },
+    {
+      "id": 149,
+      "name": "skill-behavior-style-level-word-lists-are-preserved",
+      "prompt": "Convert an official Word template whose numbered and bulleted paragraphs use built-in List Number/List Bullet paragraph styles, with numbering stored in styles.xml rather than directly on each paragraph.",
+      "expected_output": "The generated evidence packet detects the list definitions through the style inheritance chain, maps them to editable LaTeX list helpers, and does not classify the list items as manuscript headings.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "inspect_sources.py resolves w:numPr from the paragraph style and preserves the associated numbering definition or style-level fallback.",
+        "draft_spec_from_inventory.py marks lists as present and records number format, level, and source evidence.",
+        "List paragraphs are excluded from heading inference even when their text begins with a number.",
+        "The generated class remains editable and the package compiles with a representative list fixture."
+      ]
+    },
+    {
+      "id": 150,
+      "name": "skill-behavior-narrow-column-fixture-remains-compileable",
+      "prompt": "Convert an official journal Word template whose body uses narrow double columns and whose source-backed sections include tables, figures, lists, footnotes, references, and appendices.",
+      "expected_output": "The generated editable package exercises the applicable zones with compact, breakable fixture prose and compiles without hiding layout problems behind global sloppy settings.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The default representative fixture remains readable and compileable in a narrow two-column body.",
+        "The generator does not add global sloppy or emergency stretch settings solely to suppress overfull diagnostics.",
+        "Tables, figures, lists, footnotes, citations, and appendix counters remain exercised and editable.",
+        "User manuscript content remains separate from the compact verification fixture."
+      ]
+    },
+    {
+      "id": 151,
+      "name": "skill-behavior-visual-status-and-source-inventory-are-honest",
+      "prompt": "Convert an official Word journal template after inspecting its source, but do not run PDF comparison during package generation. Deliver the ordinary editable LaTeX package and state what remains to verify.",
+      "expected_output": "The package retains source_inventory.json when supplied, documents exact render/compare commands, and does not create an empty or misleading render comparison report.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The ordinary package contains source_inventory.json when the agent provides --source-inventory or when a sibling source_inventory.json is present beside template_spec.json.",
+        "README.md marks visual comparison as pending until compare_pdfs.py actually runs and gives a usable Word/PDF source path pattern.",
+        "The generator does not fabricate an empty render_compare_report.json or diff_previews directory.",
+        "A completed comparison writes render_compare_report.json, diff_previews, and layout_profile as separate verification artifacts."
+      ]
+    },
+    {
+      "id": 152,
+      "name": "skill-behavior-legacy-doc-input-retains-evidence",
+      "prompt": "Convert an official legacy .doc journal template containing styled paragraphs, tables, and embedded images when LibreOffice is available.",
+      "expected_output": "The agent converts the legacy source only to a temporary inspection copy, preserves the original as evidence, extracts structural and asset signals, and delivers the normal editable class-based LaTeX package.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "Legacy .doc/.dot/.rtf inspection uses an available office converter as a temporary structural bridge and does not overwrite the original source.",
+        "The evidence packet records conversion status and retains paragraph, table, image, and source hash information.",
+        "If conversion tooling is unavailable, the agent records the blocked evidence stage and still delivers a default-backed editable package when enough external evidence exists.",
+        "The generated package follows the ordinary .cls + main.tex output contract."
+      ]
+    },
+    {
+      "id": 153,
+      "name": "skill-regression-fixture-avoids-artificial-narrow-column-overflow",
+      "prompt": "Run the fixed cross-journal regression body through single-column and double-column generated packages containing tables and figures.",
+      "expected_output": "The shared regression fixture preserves table/figure coverage while using breakable table cells, so overfull diagnostics represent the template under test rather than an unbreakable benchmark table.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/assets/regression/stress_body.tex",
+        "C:/Users/60247/.codex/skills/temp2tex/assets/regression/stress_body_core.tex",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "The regression table remains three-column, merged-cell, captioned, and note-bearing.",
+        "Table columns use breakable p-columns with a bounded width budget in narrow columns.",
+        "Both official and Temp2Tex sides receive the same fixture body, preserving comparison fairness.",
+        "The fixture change does not add global sloppy settings to journal classes."
+      ]
+    },
+    {
+      "id": 154,
+      "name": "skill-behavior-instruction-headings-stay-out-of-manuscript",
+      "prompt": "Convert a sparse Word journal template whose instruction paragraphs use Heading 1/2 styles with titles such as 'Instructions for Authors' and 'Please insert manuscript text', alongside real Introduction, Methods, Results, and Appendix headings.",
+      "expected_output": "The generated package preserves real manuscript heading structure but does not emit Word template instructions as manuscript sections; the source instruction evidence remains in the audit files.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "Instruction-like heading titles are filtered from body.sections before main.tex is generated.",
+        "Real Introduction/Methods/Results/Appendix headings remain represented in editable main.tex.",
+        "Instruction source text is retained as evidence or gap context rather than silently discarded from the audit trail.",
+        "The generated package compiles and follows the ordinary class-based output contract."
+      ]
+    },
+    {
+      "id": 155,
+      "name": "skill-regression-corpus-has-no-missing-source-cases",
+      "prompt": "Run the fixed 30-case journal regression manifest under offline conditions after a source replacement. Report comparability separately from visual quality.",
+      "expected_output": "Every admitted case has a verifiable Word source and either an official LaTeX comparison or an explicit Word-render fallback; missing-source cases are replaced rather than counted as passes.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "Preflight reports zero missing Word sources for the fixed 30-case manifest.",
+        "Each case records official_latex or word_render_fallback comparison mode explicitly.",
+        "Word-render fallback is accepted as the comparison method when official LaTeX is unavailable or cannot compile, without weakening page/zone/visual gates.",
+        "The final report separates source comparability, generated-package compilation, hard gates, and visual pass counts.",
+        "The agent does not claim the suite is clean when comparable cases fail visual or pagination gates."
+      ]
+    },
+    {
+      "id": 156,
+      "name": "skill-behavior-local-run-formatting-does-not-leak-to-whole-role",
+      "prompt": "Convert a Word template where an Abstract label or correspondence marker has direct bold run formatting but the surrounding paragraph style is regular.",
+      "expected_output": "The evidence packet keeps paragraph-level role formatting separate from local run overrides, and the generated class does not make the entire abstract or affiliation block bold without source evidence.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "The role evidence prefers a representative visible exemplar without promoting a short label's direct run formatting to the whole role.",
+        "Named-style font properties remain the baseline when present; sample run font properties are retained as evidence but do not overwrite that baseline.",
+        "The generated package compiles and preserves editable abstract, affiliation, and caption interfaces."
+      ]
+    },
+    {
+      "id": 157,
+      "name": "skill-behavior-source-assets-and-page-fields-remain-editable",
+      "prompt": "Convert a Word template containing body images, a text-only running header with page and total-page fields, and a separate first-page logo variant.",
+      "expected_output": "The generated package uses extracted body assets in the representative figure, maps later-page text and page fields to editable header/footer slots, and leaves first-page image placement explicitly pending or separately confirmed.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "The ordinary main.tex figure fixture prefers a copied body asset when the asset manifest marks one as body content.",
+        "A page field sequence without an explicit tab token can be split into left running text and right page-number slots.",
+        "First-page drawings are not silently treated as ordinary text furniture; their placement remains a render-confirmed candidate.",
+        "The package compiles without unresolved assets or placeholder paths."
+      ]
+    },
+    {
+      "id": 158,
+      "name": "skill-behavior-mixed-page-furniture-is-partitioned",
+      "prompt": "Convert a Word journal template that has a safe later-page text header, an unsafe first-page logo or text box, and different even-page furniture.",
+      "expected_output": "The generated class preserves the safe editable running text/page fields while keeping unsafe image or text-box placement pending; one unsafe active variant does not disable all page furniture.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "Source inspection marks safe text/page-field parts independently from drawing-bearing or text-box parts.",
+        "The generated class maps safe later-page header/footer text and page fields to editable fancyhdr slots.",
+        "First-page or image-bearing furniture is not silently activated as ordinary text or inherited by later pages.",
+        "The generated package compiles and records the remaining asset-placement verification gap."
+      ]
+    },
+    {
+      "id": 159,
+      "name": "skill-behavior-role-line-metrics-preserve-evidence-strength",
+      "prompt": "Convert a Word template whose title, author, affiliation, and heading styles contain explicit exact or atLeast line-spacing metrics, while ordinary body text uses automatic spacing.",
+      "expected_output": "The generated class applies explicit role-level line metrics where their evidence is strong, keeps automatic body spacing conservative, and remains editable and compileable.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "Exact and atLeast Word role line metrics can become the role's physical TeX baseline when the size range is valid.",
+        "Automatic Word line spacing does not become a global fixed baseline without render confirmation.",
+        "The mapping remains local to the evidenced role and does not overwrite unrelated body or heading defaults.",
+        "A representative package compiles without unresolved placeholders or overfull diagnostics introduced by the mapping."
+      ]
+    },
+    {
+      "id": 160,
+      "name": "skill-regression-normalization-removes-stale-source-metadata",
+      "prompt": "Run the same stress manuscript through an official LaTeX template and a generated class package whose source main.tex contains placeholder title, author, and affiliation commands before the document body.",
+      "expected_output": "The regression runner compares one normalized manuscript on both sides and does not retain stale source example metadata alongside the injected stress front matter.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/assets/regression/stress_preamble.tex",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "Preamble metadata commands are removed only when they start a source line, preserving class and package definitions.",
+        "The injected title, author, affiliation, abstract, and body are the only normalized stress manuscript content.",
+        "The normalization report records which source metadata commands were stripped.",
+        "The official and generated normalized projects still compile and produce the same required text zones before visual scoring."
+      ]
+    },
+    {
+      "id": 161,
+      "name": "skill-regression-exercises-generated-table-interface",
+      "prompt": "Run the fixed stress manuscript through a generated class that exposes an editable journaltable environment, alongside the existing journalfigure environment.",
+      "expected_output": "The regression normalization uses both generated editable wrappers when they exist and records the adapters, so table and figure class behavior is actually exercised.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "A generated class with journaltable is detected without requiring a hard-coded journal name.",
+        "Table environments in the stress body are adapted to journaltable while preserving optional placement arguments and nested content.",
+        "The normalization report records journaltable_adapter separately from journalfigure_adapter.",
+        "Official and generated normalized projects compile with the table interface enabled."
+      ]
+    },
+    {
+      "id": 162,
+      "name": "skill-behavior-page-furniture-evidence-names-safe-parts",
+      "prompt": "Inspect a Word template with safe later-page text fields, a drawing-bearing first-page header, and an unsafe even-page variant.",
+      "expected_output": "The template spec records the exact safe text/page-field parts, while the generated package keeps unsafe asset placement pending and the audit remains explainable.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "template_spec.json includes safe_text_parts alongside the boolean auto-apply decision.",
+        "The safe part list excludes active drawings, embedded relationships, and text boxes.",
+        "The class maps only the named safe parts to editable page furniture.",
+        "The gap log can distinguish pending image placement from enabled text/page-field mapping."
+      ]
+    },
+    {
+      "id": 163,
+      "name": "skill-behavior-word-section-flow-is-preserved",
+      "prompt": "Inspect a Word template with multiple sections, mixed one/two-column frames, different first-page settings, and explicit section-break types.",
+      "expected_output": "The evidence packet preserves the complete section flow and the generated class exposes editable section-boundary helpers without silently claiming unsupported continuous transitions.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "Source inspection records each section's section_break_type, page frame, columns, and different-first-page flag.",
+        "template_spec.json contains page.section_flow with all source sections in order.",
+        "The generated class exposes editable single-column, double-column, and page-break helpers.",
+        "format_gap_log.md records later or continuous section transitions as pending instead of silently flattening them."
+      ]
+    },
+    {
+      "id": 164,
+      "name": "skill-behavior-unequal-columns-and-column-breaks-are-preserved",
+      "prompt": "Inspect a Word template whose w:cols element has unequal column widths and whose title paragraph contains an explicit column break.",
+      "expected_output": "The evidence packet preserves the unequal column geometry and paragraph-level break, while the generated class exposes a render-confirmed candidate instead of silently flattening the source into equal-width columns.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "Source inspection records child w:col widths and paragraph break_types/column_break evidence.",
+        "template_spec.json preserves page.column_widths_twips and front_matter.column_break_evidence.",
+        "The generated class exposes the source widths and an editable unequal-column candidate without enabling it silently.",
+        "format_gap_log.md explains why equal-width twocolumn output is insufficient and requires rendered confirmation."
+      ]
+    },
+    {
+      "id": 165,
+      "name": "skill-behavior-inline-abstract-spacing-stays-role-local",
+      "prompt": "Convert a Word template whose inline Abstract paragraph has explicit before and after spacing in its semantic role style, while Normal paragraphs also have inherited spacing.",
+      "expected_output": "The generated class maps only the explicit abstract role spacing to the abstract environment boundary and does not turn inherited body spacing into a global front-matter rule.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "Inline abstract output contains explicit opening and closing skips derived from abstracts.style.direct_format.paragraph.",
+        "Inherited Normal-style space_before/space_after does not become the abstract boundary unless the abstract role explicitly carries it.",
+        "A role whose only visible samples are table-cell instructions does not promote those cell metrics to the manuscript abstract.",
+        "The mapping is local to the abstract environment and the package remains compileable."
+      ]
+    },
+    {
+      "id": 166,
+      "name": "skill-behavior-body-after-spacing-stays-evidence-scoped",
+      "prompt": "Convert a Word template whose ordinary body style has explicit positive space_after_twips, alongside a table-cell body exemplar and an unverified named style candidate.",
+      "expected_output": "The generated class maps the explicit ordinary-flow body after spacing to parskip while leaving table-cell and unverified candidate metrics out of global body spacing.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "A valid non-table body role with an explicit 6pt-or-larger direct space_after_twips produces the corresponding parskip.",
+        "A smaller explicit body gap remains conservative until render evidence confirms it.",
+        "template_style_candidate and table_cell_body_exemplar roles keep parskip at zero.",
+        "The class remains compileable and the mapping does not modify title, abstract, or heading spacing."
+      ]
+    },
+    {
+      "id": 167,
+      "name": "skill-regression-probes-table-placement-without-changing-default",
+      "prompt": "Run the regression harness on Word templates containing representative tables and compare the ordinary floating journaltable with a source-derived non-floating candidate.",
+      "expected_output": "The harness records a table placement candidate and its PDF metrics while leaving the ordinary generated package on the conservative floating default unless the candidate wins rendered comparison.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "--table-placement-probe creates an inline-table-placement-probe variant only when table evidence exists.",
+        "The candidate compiles and receives the same PDF comparison gates as the base package.",
+        "The candidate records tables.layout_evidence.placement_calibration with status render_probe and never writes legacy placement_verified fields.",
+        "The base generated class remains a floating journaltable until the strict gate produces render_verified acceptance.",
+        "Probe output records whether the candidate or base is closer without silently changing ordinary conversion behavior."
+      ]
+    },
+    {
+      "id": 168,
+      "name": "skill-regression-probes-table-border-geometry-and-gridlines",
+      "prompt": "Run the regression harness on Word templates whose table XML distinguishes printable active borders from editor gridlines and exposes source column widths.",
+      "expected_output": "The skill preserves active border evidence, avoids inventing printed rules from an empty border list, and exposes precise/full-width geometry candidates without changing ordinary conversion defaults.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "The generated representative table distinguishes an explicit empty active_borders list from a TableGrid style, preserving the latter as printable grid evidence.",
+        "Horizontal, vertical, and complete border modes map to distinct editable LaTeX table structures.",
+        "--table-geometry-probe creates precise and full-width candidates only when source grid widths exist.",
+        "The ordinary package keeps the conservative base geometry until same-content PDF comparison selects a candidate.",
+        "A candidate is rejected when its wider grid changes page count, creates overflow, or worsens the visual comparison."
+      ]
+    },
+    {
+      "id": 169,
+      "name": "skill-behavior-visible-body-overrides-conflicting-normal-style",
+      "prompt": "Inspect a Word template whose named Normal body style declares one font size while multiple long ordinary-flow manuscript paragraphs carry a stable direct font override.",
+      "expected_output": "The template spec records the dominant visible body formatting as a render candidate, while ordinary output keeps the named style until same-content PDF comparison selects the candidate.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "At least two long ordinary-flow paragraphs are grouped by their effective font and paragraph metrics.",
+        "A dominant visible group with a conflicting font size/family overrides a generic Normal/Body style for body evidence.",
+        "The spec marks the decision as named_style_with_visible_flow_conflict, stores the candidate and rationale, and does not silently promote it.",
+        "A single local paragraph override is not sufficient to replace the named body style, and a publisher-specific Body Undented style remains authoritative.",
+        "--body-style-probe creates a compileable candidate and ordinary output keeps the named style until the PDF comparison accepts the candidate."
+      ]
+    },
+    {
+      "id": 170,
+      "name": "skill-behavior-text-boxes-remain-explicit-candidates",
+      "prompt": "Convert a Word template containing floating text boxes in the first page or header/footer, where XML preserves text but not reliable manuscript coordinates.",
+      "expected_output": "The generated package preserves text-box evidence and exposes an editable LaTeX candidate without silently inserting the boxes into manuscript flow.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "template_spec.json and assets/word_asset_manifest.json retain text-box source, text, and visual-review evidence.",
+        "The package contains textboxes.tex with source-labeled, commented journaltextbox candidates.",
+        "journal-template.cls exposes a compileable journaltextbox environment with an editable width argument.",
+        "main.tex does not automatically input textboxes.tex or promote non-flow text-box content into body paragraphs.",
+        "README.md and format_gap_log.md state that exact text-box placement remains pending same-content render comparison."
+      ]
+    },
+    {
+      "id": 171,
+      "name": "skill-behavior-section-flow-is-an-editable-boundary-candidate",
+      "prompt": "Convert a Word template with multiple sections, mixed one/two-column frames, page and continuous section breaks, and unequal column metadata.",
+      "expected_output": "The generated package preserves the ordered section evidence and emits a commented boundary candidate without silently changing the manuscript's ordinary flow.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "template_spec.json preserves every Word section in source order with break type, page frame, columns, and width evidence.",
+        "The package contains section-flow.tex with source-labeled commented journal section helpers.",
+        "Continuous section boundaries are not converted into an automatic page break.",
+        "main.tex remains on the conservative ordinary flow and does not input section-flow.tex automatically.",
+        "README.md and format_gap_log.md require semantic-boundary and PDF pagination confirmation before promotion."
+      ]
+    },
+    {
+      "id": 172,
+      "name": "skill-behavior-text-box-geometry-is-preserved",
+      "prompt": "Inspect a Word template whose figure and table captions are absolute-positioned text boxes with page, margin, or column-relative offsets and wrap settings.",
+      "expected_output": "The evidence packet retains source text-box geometry and the generated candidate records it without automatically placing uncertain shapes into manuscript flow.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "Source inspection records text-box width/height, horizontal and vertical relative coordinate systems, offsets, wrap type, and shape identity when Word XML exposes them.",
+        "Duplicate w:txbxContent and drawingML text-body views of the same shape are not counted as separate evidence items.",
+        "template_spec.json retains the geometry under assets.text_boxes and textboxes.tex prints source-labeled geometry comments.",
+        "main.tex does not automatically place uncertain text boxes, and README.md or format_gap_log.md keeps visual confirmation as the promotion gate.",
+        "The inventory and generated package remain valid and compileable for a representative text-box template."
+      ]
+    },
+    {
+      "id": 173,
+      "name": "skill-regression-probes-text-box-placement-without-changing-default",
+      "prompt": "Run the regression harness on a Word template with page/margin-relative anchored text boxes and another with column/paragraph-relative shapes.",
+      "expected_output": "The harness measures an explicit placement candidate only where coordinates are executable, while ordinary conversion remains commented and conservative.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "--text-box-placement-probe creates a text-box-placement-probe variant only when source geometry exists.",
+        "The candidate includes textboxes-active.tex and main.tex inputs it only in the probe variant.",
+        "Page/margin-relative coordinates are converted into editable textpos lengths, while column/paragraph-relative boxes remain omitted with an explicit reason.",
+        "The candidate compiles and is evaluated with the same PDF gates as the base package.",
+        "The ordinary generated package keeps textboxes.tex commented and does not auto-apply text-box placement."
+      ]
+    },
+    {
+      "id": 174,
+      "name": "skill-behavior-preserves-drawing-anchor-and-section-frame-evidence",
+      "prompt": "Inspect a Word template with inline images, wrapped anchored images, multiple section page frames, and continuous and page section breaks.",
+      "expected_output": "The evidence packet distinguishes drawing anchor/wrap behavior and preserves every section frame; the generated package exposes commented, editable candidates without applying local Word geometry globally.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "body_drawings retain inline/anchor type, dimensions, relative coordinate systems, offsets, wrap type, overlap, and z-order evidence when exposed by Word XML.",
+        "figures.layout_evidence preserves selected anchor_geometry and the set of observed drawing and wrap types.",
+        "The package contains page-frame.tex alongside section-flow.tex for a multi-section source, with per-section page and margin evidence.",
+        "Continuous section boundaries are not turned into automatic page breaks, and later section frames are not applied globally.",
+        "The ordinary package remains compileable and keeps page-frame.tex, section-flow.tex, and uncertain figure placement as candidates."
+      ]
+    },
+    {
+      "id": 175,
+      "name": "skill-behavior-does-not-promote-prefix-only-word-styles",
+      "prompt": "Inspect an official Word template whose style names include publisher prefixes such as MDPI_1.6_affiliation, but whose title style is absent or whose table and figure caption styles are distinct.",
+      "expected_output": "The evidence packet selects only role-matching Word styles, marks missing roles as defaults or candidates, and never reuses an unrelated prefixed style merely because it belongs to the same publisher style family.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/reconstruction-protocol.md"
+      ],
+      "expectations": [
+        "A publisher-prefix bonus is applied only after the style name matches the requested semantic role.",
+        "An affiliation style cannot become the title, abstract, table-caption, or figure-caption evidence when no role match exists.",
+        "A title-like first paragraph is accepted only when it is not an instruction or sentence-like guidance text.",
+        "Missing visible role evidence is recorded as a fallback or template-style candidate rather than silently promoted to source evidence."
+      ]
+    },
+    {
+      "id": 176,
+      "name": "skill-behavior-preserves-section-specific-page-furniture",
+      "prompt": "Convert a Word journal template whose active header/footer parts change across multiple sections, including page fields, running text, and possible first-page variants.",
+      "expected_output": "The generated class keeps a safe ordinary page style while the package exposes commented, per-section editable furniture candidates that the model can apply only at confirmed manuscript boundaries.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "page-furniture.tex is emitted when active Word header/footer evidence exists.",
+        "The candidate records section index and active Word part names and emits section-specific fancyhdr styles when text/page-field slots are executable.",
+        "The ordinary main.tex does not input page-furniture.tex automatically and does not promote a later section's furniture globally.",
+        "README.md and format_gap_log.md explain the semantic-boundary and same-content PDF promotion gate.",
+        "The generated package remains compileable for templates with multiple Word sections."
+      ]
+    },
+    {
+      "id": 177,
+      "name": "skill-behavior-distinguishes-uniform-run-formatting-and-keyword-role",
+      "prompt": "Convert a Word journal template whose title, abstract, and keyword paragraphs use the generic Normal style, while character formatting lives in Word runs: one keyword line is uniformly bold and another abstract has only a bold label followed by regular text.",
+      "expected_output": "The package promotes only paragraph-wide uniform run typography, keeps mixed label formatting local, and applies keyword formatting through a dedicated class role rather than the abstract or body style.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "Source inspection records whether visible Word runs have one uniform font signature or mixed signatures.",
+        "A mixed bold label plus regular value does not promote bold into the whole abstract, affiliation, caption, or body role.",
+        "A uniformly formatted keyword paragraph can supply the keyword role's font, alignment, indentation, and local spacing.",
+        "template_spec.json stores abstracts.keyword_style separately from abstracts.style and the generated class uses that role only in its keyword helper.",
+        "The generated package remains compileable and records a default keyword role when no semantic keyword evidence exists."
+      ]
+    },
+    {
+      "id": 178,
+      "name": "skill-behavior-preserves-index-terms-keyword-label",
+      "prompt": "Convert an official Word journal template that labels the keyword paragraph `Index Terms:` and applies its formatting through direct Word runs rather than a semantic Keywords style.",
+      "expected_output": "The skill recognizes the paragraph as keyword evidence, preserves the visible `Index Terms:` label, and generates an editable keyword helper without reclassifying it as body text or replacing the label with `Keywords:`.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "Index Terms, Key words, Keywords, and Chinese 关键词 map to the keyword role without conflating their visible labels.",
+        "template_spec.json stores both abstracts.keyword_style and abstracts.keyword_label.",
+        "journal-template.cls renders the preserved source label through tempTwoKeywordsLabel and keeps keyword typography local.",
+        "An absent semantic keyword style still records a default role and does not cause the generator to stop or invent publisher rules.",
+        "The generated package compiles without unresolved keyword placeholders."
+      ]
+    },
+    {
+      "id": 179,
+      "name": "skill-behavior-triages-protected-or-corrupt-word-input",
+      "prompt": "Convert an official journal Word template, but the downloaded .docx is encrypted or malformed and cannot be inspected. The official journal page and a rendered author-template PDF remain accessible. Deliver the best editable LaTeX template package possible.",
+      "expected_output": "A class-based package reconstructed from the remaining official evidence, with inaccessible Word-only properties explicitly unverified and no fabricated style or XML claims.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/input-triage.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The agent records that the Word payload could not be inspected and does not invent named styles, section properties, or embedded assets.",
+        "The accessible official page and PDF are recorded as replacement evidence with provenance.",
+        "journal-template.cls and main.tex are still delivered with source-backed rules plus clearly labelled defaults.",
+        "template_spec.json and format_gap_log.md distinguish inaccessible Word evidence from unavailable rendering tools.",
+        "The agent does not claim visual equivalence without a successful same-content comparison."
+      ]
+    },
+    {
+      "id": 180,
+      "name": "skill-behavior-selects-current-source-and-detects-word-payload",
+      "prompt": "Convert a journal template when the official page offers a current DOCM template, an older DOC template, and a file named .docx whose payload is actually an HTML error page. The DOCM macros are submission helpers and must not be executed.",
+      "expected_output": "The current valid OpenXML template is selected by provenance and payload inspection, legacy alternatives are retained as variants, and the invalid download is rejected without blocking package delivery.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/input-triage.md",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py"
+      ],
+      "expectations": [
+        "The agent detects the Word container from its payload rather than trusting the suffix.",
+        "The current official DOCM is inspected as OpenXML without executing macros.",
+        "The older DOC remains provenance evidence or a labelled legacy variant and is not silently merged into the current layout.",
+        "The HTML-disguised .docx is recorded as invalid rather than treated as a valid template.",
+        "The ordinary editable class package is produced without launching the 30-case regression suite."
+      ]
+    },
+    {
+      "id": 181,
+      "name": "skill-regression-calibrates-stable-body-density-only-through-candidate",
+      "prompt": "A generated journal package has the same page count, page size, body width, required zones, and anchor pages as the rendered Word reference, but its body font and same-column baseline steps differ consistently across three pages. Improve fidelity without overwriting the official Word evidence.",
+      "expected_output": "The agent creates a bounded, separate body-density render probe and promotes it only if same-content PDF comparison improves over the ordinary package without structural regression.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/profile_pdf_layout.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/suggest_body_calibration.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/materialize_body_calibration_candidate.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The profile measures same-column baseline steps and does not treat raw adjacent-line whitespace as the only density signal.",
+        "The proposal requires stable page count, body width, anchor pages, and cross-page measurements before exposing a candidate.",
+        "The original document.font_size_pt and Word line-spacing evidence remain unchanged in the candidate spec.",
+        "The candidate is generated only through an explicit render-probe path and compilation alone does not promote it.",
+        "Promotion requires unchanged structural gates and an improved same-content visual comparison relative to the ordinary package."
+      ]
+    },
+    {
+      "id": 182,
+      "name": "skill-regression-rejects-unsafe-or-worse-body-calibration",
+      "prompt": "Body-density diagnostics are noisy: one template has a page-count or anchor-page mismatch, another has unstable baseline deltas, and a third candidate compiles but its mean PDF diff is slightly worse than the ordinary package.",
+      "expected_output": "The agent rejects all three body calibrations, keeps the ordinary editable package, and routes each failure to structural repair or documented pending verification.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/suggest_body_calibration.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "Page-count, body-width, or anchor-page instability prevents candidate materialization.",
+        "High cross-page font or baseline-step variation returns candidate_available false with a reason.",
+        "A compileable candidate with equal or worse visual metrics is rejected rather than marked render_verified.",
+        "The ordinary class package remains deliverable and its official Word evidence is not overwritten.",
+        "The agent does not launch or retune the full 30-case suite during an ordinary single-template conversion."
+      ]
+    },
+    {
+      "id": 183,
+      "name": "skill-behavior-reconstructs-caption-order-from-word-flow",
+      "prompt": "Convert a Word journal template containing a table caption below its table, a figure caption below an inline drawing, a caption-like table header cell, and generic instructional prose beginning with `Figure 2 is an example`. Preserve only defensible caption order evidence.",
+      "expected_output": "The spec records external object-caption adjacency, applies the source-backed below positions in the editable fixture, and rejects table-cell or instructional false positives.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "Source inspection records table first/last paragraph indexes, drawing paragraph indexes, caption candidates, distance, direction, and classification source.",
+        "Caption-like text inside a table cell is not attached as an external table caption.",
+        "Generic instructional prose is rejected unless a semantic caption style supplies stronger evidence.",
+        "template_spec.json distinguishes source-backed caption position from a documented default and preserves the observed relation.",
+        "main.tex exercises the selected table/figure caption order without changing uncertain float placement into a journal-wide rule."
+      ]
+    },
+    {
+      "id": 184,
+      "name": "skill-behavior-compiles-fractional-word-table-columns",
+      "prompt": "Generate an editable LaTeX package from a Word template whose representative table has six unequal grid columns and occupies a fractional text width.",
+      "expected_output": "The representative table uses source-derived fractional columns through a valid LaTeX length and the delivered ordinary main.tex compiles.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "journal-template.cls declares journaltablewidth as a LaTeX length and assigns the selected source-derived width to it.",
+        "Fractional p-column widths multiply the length register rather than concatenating two decimal macro expansions.",
+        "The representative fixture retains all six source-derived column ratios and remains editable.",
+        "main.tex compiles without an Illegal unit of measure error.",
+        "The table geometry remains representative evidence and is not silently imposed on every manuscript table."
+      ]
+    },
+    {
+      "id": 185,
+      "name": "skill-behavior-keeps-column-sized-word-objects-at-local-width",
+      "prompt": "Convert a two-column Word journal template whose representative figure and table are each approximately one Word column wide. The full printable page is about twice as wide as one column.",
+      "expected_output": "The agent resolves object width against the containing Word section's local column, keeps both objects in ordinary editable float wrappers, and does not shrink them to roughly half of LaTeX linewidth.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "Source inspection records the selected table and drawing paragraph indexes and containing Word section indexes.",
+        "Span classification computes local column width from the object's section rather than using only full printable page width.",
+        "A near-column object receives source-backed single_column span evidence and resolves to approximately \\linewidth.",
+        "main.tex uses journaltable and journalfigure rather than starred wide wrappers for those exemplars.",
+        "The delivered ordinary package compiles and retains editable representative dimensions."
+      ]
+    },
+    {
+      "id": 186,
+      "name": "skill-behavior-requires-source-backed-local-section-evidence-for-wide-floats",
+      "prompt": "Convert a journal Word template containing a clearly page-spanning figure in a two-column body, an ambiguous figure in a one-column title section, and ordinary appendix figures. Choose float spans without turning one exemplar into a global rule.",
+      "expected_output": "Only the clearly source-backed body object uses the explicit wide helper; ambiguous and unrelated objects remain ordinary editable floats and the uncertainty is recorded for visual verification.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The body figure's object width is compared with both its local column and usable section width and records status source plus mode double_column.",
+        "The class exposes journalfigurewide and journaltablewide, using starred floats only in a two-column class.",
+        "The one-column-section exemplar remains uncertain unless rendered evidence establishes its role; it does not receive a guessed body-wide classification.",
+        "Appendix and unrelated examples remain ordinary journalfigure or journaltable content even when the selected representative object is wide.",
+        "format_gap_log.md and README.md state the span evidence status and the pending visual check for ambiguous objects."
+      ]
+    },
+    {
+      "id": 187,
+      "name": "skill-behavior-promotes-only-strict-same-target-render-probes",
+      "prompt": "A body-density render probe compiles and improves the same-reference PDF comparison. Decide whether it may replace the ordinary Temp2TeX spec and preserve an auditable acceptance trail.",
+      "expected_output": "The agent uses the strict promotion gate and creates a separate render_verified spec only when the candidate changes calibration fields alone and every structural and visual acceptance condition passes.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "The candidate may differ from the original only at page.render_calibration or document.render_calibration with status render_probe.",
+        "Candidate compilation succeeds and ordinary/candidate comparisons use the same reference PDF.",
+        "Reference page count and page size remain stable and the candidate introduces no anchor-page or missing-anchor failures.",
+        "Mean normalized diff improves meaningfully while maximum page diff and layout penalty do not worsen.",
+        "The original spec is not modified; the new render_verified spec stores portable evidence names and hashes and the detailed promotion report remains separate."
+      ]
+    },
+    {
+      "id": 188,
+      "name": "skill-behavior-rejects-compile-only-worse-or-tampered-render-probes",
+      "prompt": "Evaluate three render probes: one only compiles, one slightly worsens mean diff and layout penalty, and one improves visually but also edits front-matter fields outside render_calibration.",
+      "expected_output": "All unsafe probes are rejected, no verified spec is emitted, and the ordinary editable package remains the deliverable with explicit rejection reasons.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md",
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md"
+      ],
+      "expectations": [
+        "Compilation alone is never sufficient promotion evidence.",
+        "A candidate with no meaningful mean-diff improvement or a worse layout penalty is rejected.",
+        "A candidate that changes any non-calibration field is rejected even when its PDF metrics improve.",
+        "A rejected run writes promotion_report.json but removes or does not create the requested verified spec.",
+        "The ordinary package remains usable and the agent does not launch the 30-case suite during a normal conversion."
+      ]
+    },
+    {
+      "id": 189,
+      "name": "skill-behavior-separates-abstract-label-content-and-keyword-roles",
+      "prompt": "Convert a Word journal template where `Abstract` is a standalone bold paragraph, the next paragraph contains regular justified abstract content, and a later `Keywords:` paragraph has independent formatting.",
+      "expected_output": "The agent records separate label, content, and keyword roles with paragraph indexes and generates a class-owned block abstract without leaking label typography into the content.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/latex-architecture.md"
+      ],
+      "expectations": [
+        "template_spec.json uses abstracts.label_mode separate and records distinct label/content paragraph indexes and styles.",
+        "The adjacent content paragraph is selected from Word document flow rather than treating the label-only paragraph as the abstract body.",
+        "journal-template.cls redefines the block abstract environment and does not inherit article's quotation width, heading, or vertical skips.",
+        "Label font/alignment remain local and do not make the abstract body bold or centred.",
+        "The keyword role retains its own label, typography, content box, and boundary evidence."
+      ]
+    },
+    {
+      "id": 190,
+      "name": "skill-behavior-emits-each-front-matter-spacing-boundary-once",
+      "prompt": "A Word template stores 6pt after the title and 12pt before the author, then 8pt after the affiliation and 4pt before a separate Abstract label. Rebuild the front matter without doubled vertical whitespace, and handle another template whose abstract content has no visible label.",
+      "expected_output": "Each semantic boundary is recorded as the larger adjacent Word value and emitted once; the second template preserves a no-label abstract instead of inventing or mis-parsing a heading.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/validate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "front_matter.spacing_boundaries stores both raw sides, paragraph indexes, source/default status, resolved_pt, and the max-and-emit-once rule.",
+        "The title-to-author boundary resolves to 12pt rather than 18pt and appears only once in the class.",
+        "The affiliation-to-abstract boundary is not duplicated by both affiliation-local and post-maketitle skips.",
+        "Indentation alone or prose beginning `Abstract text` does not prove an inline label; visible content without a label uses label_mode none.",
+        "Package validation fails when the required boundary ledger or abstract label/content contract is missing."
+      ]
+    },
+    {
+      "id": 191,
+      "name": "skill-behavior-preserves-abstract-structure-inside-word-layout-tables",
+      "prompt": "Convert a journal Word template whose title, keywords, standalone `Abstract` label, and abstract content are stored in a borderless layout table. Preserve the visible structure without treating the table cells as manuscript data tables.",
+      "expected_output": "The agent recognizes the visible label and adjacent content inside the layout table, emits a class-owned separate-label abstract, and retains a single auditable spacing boundary.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md"
+      ],
+      "expectations": [
+        "A visible label-only Abstract paragraph remains eligible evidence when in_table_cell is true.",
+        "The nearest adjacent content paragraph supplies the abstract body style and a distinct paragraph index.",
+        "The surrounding borderless layout table is not reproduced as a scientific table environment.",
+        "journal-template.cls owns the abstract heading, content formatting, and label-to-content spacing.",
+        "The ordinary package validates and compiles, and PDF comparison retains page count, page size, and required zones."
+      ]
+    },
+    {
+      "id": 192,
+      "name": "skill-behavior-resolves-caption-object-gap-from-facing-word-sides",
+      "prompt": "Convert a Word template where a figure paragraph has 10pt space-after and its below-caption paragraph has 3pt space-before plus 9pt space-after. Preserve the actual image-to-caption boundary without doubling it.",
+      "expected_output": "The agent records object-after and caption-before as the two facing sides, resolves the gap to 10pt, and emits it once through the class caption setup.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/validate_latex_package.py"
+      ],
+      "expectations": [
+        "The drawing inventory retains its paragraph index plus direct and effective paragraph formatting.",
+        "figures.caption_spacing_evidence names object space-after and caption space-before and stores both raw twips values.",
+        "resolved_pt is 10 rather than 3, 9, 12, or 19.",
+        "The generated class uses the resolved boundary once and does not also retain a competing caption-local skip.",
+        "The ordinary package validates and compiles."
+      ]
+    },
+    {
+      "id": 193,
+      "name": "skill-behavior-does-not-substitute-caption-outside-spacing",
+      "prompt": "A Word figure caption has 12pt space-after but no source-backed object relation and no measured image-facing paragraph side. Decide the figure-to-caption gap without inventing evidence.",
+      "expected_output": "The agent records a default caption/object gap, leaves the 12pt outside-caption spacing out of the image boundary decision, and preserves it separately only when caption order makes that outer side source-backed.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "caption_spacing_evidence has status default when caption order is not source-backed.",
+        "The ledger names the expected facing sides but leaves their raw values null.",
+        "The resolved default is documented in format_gap_log.md and README.md.",
+        "The caption's 12pt space-after is not treated as a below-caption object gap; when order is source-backed it maps only to outer_pt/belowskip.",
+        "Normal conversion remains independent of the 30-case regression suite."
+      ]
+    },
+    {
+      "id": 194,
+      "name": "skill-behavior-placement-evidence-creates-candidate-not-verification",
+      "prompt": "Convert a Word journal template containing an inline body figure and a normal table. No PDF renderer is available. Decide whether the LaTeX class should make either object non-floating.",
+      "expected_output": "The agent delivers the editable class with ordinary floats, records source-derived non-floating options only as inactive render_probe candidates, and lists the missing PDF verification without blocking delivery.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py"
+      ],
+      "expectations": [
+        "Word inline/anchor state is treated as evidence for a candidate rather than proof of LaTeX float policy.",
+        "Any candidate uses placement_calibration with status render_probe, mode nonfloating, and a source rationale.",
+        "journalfigure and journaltable remain floating because no render_verified acceptance exists.",
+        "The package is still delivered and README records exact pending render checks.",
+        "No placement_mode plus placement_verified shortcut appears in the final spec."
+      ]
+    },
+    {
+      "id": 195,
+      "name": "skill-regression-strict-placement-promotion",
+      "prompt": "A non-floating figure candidate compiled and appears closer on one page. Decide whether it can replace the ordinary floating class rule and produce the final spec.",
+      "expected_output": "The placement rule is promoted only by the strict same-target gate when all structural and visual metrics pass; otherwise the ordinary floating package remains unchanged.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/validate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "Exactly one figure or table placement_calibration path may be active in a placement candidate.",
+        "The candidate must use the same reference PDF, compile, preserve page count and size, and introduce no new anchor failures.",
+        "Mean visual diff must improve while maximum diff, layout penalty, and table/figure/caption/float score do not worsen.",
+        "Acceptance writes render_verified plus a portable acceptance ledger; rejection writes no verified spec.",
+        "Compilation or one visually improved page alone is insufficient for promotion."
+      ]
+    },
+    {
+      "id": 196,
+      "name": "skill-behavior-separates-float-text-from-caption-and-object-notes",
+      "prompt": "Convert a Word journal template where a figure is followed by a figure caption, then a table caption and table; the table is followed by a table footer. A normal body paragraph appears only before the figure. Reconstruct float spacing without conflating these boundaries.",
+      "expected_output": "The evidence ledger retains every outer neighbor but only the normal body paragraph contributes to the float/text spacing aggregate; ordinary LaTeX float lengths remain unchanged.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/inspect_sources.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/validate_latex_package.py"
+      ],
+      "expectations": [
+        "Each representative object records block start/end, preceding/following paragraph identity, both raw Word spacing sides, and a single-emission resolved value.",
+        "The figure caption, table caption, and table footer are classified as object_caption or object_note rather than body_text_candidate.",
+        "Only a body_text_candidate boundary contributes to page.float_spacing_evidence.resolved_pt and eligible_boundary_count.",
+        "Caption/object internal and outer-caption skips remain separate ledgers and are not reused as float/text spacing.",
+        "Ordinary journal-template.cls contains no source-derived textfloatsep, intextsep, or dbltextfloatsep override."
+      ]
+    },
+    {
+      "id": 197,
+      "name": "skill-regression-strict-float-spacing-promotion",
+      "prompt": "Word object/body-text boundaries suggest 12pt float separation. Test whether that value should replace LaTeX float spacing in the generated journal class.",
+      "expected_output": "A separate render_probe candidate tests the three relevant TeX lengths, and only the strict same-target gate may create a render_verified final spec.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "--float-spacing-probe creates one candidate only when float_spacing_evidence.status is source.",
+        "The candidate ledger remains render_probe while its regression class temporarily sets textfloatsep, intextsep, and dbltextfloatsep.",
+        "The calibration must be the only active candidate path and use bounded 0-72pt values with a source rationale.",
+        "Promotion requires same reference, successful compile, stable page geometry and anchors, lower mean diff, and non-worse maximum, layout, and float diagnostic metrics.",
+        "Rejected candidates leave ordinary output untouched; accepted output stores render_verified and a portable acceptance ledger."
+      ]
+    },
+    {
+      "id": 198,
+      "name": "skill-regression-uses-unique-versioned-pdf-anchors",
+      "prompt": "Compare the same manuscript rendered through an official template and a Temp2TeX class. The abstract mentions tables and figures before the real table and figure captions. Build the layout diagnosis without false anchor hits.",
+      "expected_output": "The agent uses unique manuscript phrases for semantic zones, records the anchor-map version, and refuses to compare diagnostics produced with different anchor definitions.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/profile_pdf_layout.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "Generic words such as Table, Figure, and References are not accepted as semantic anchors.",
+        "The bundled default anchor map is identified as regression-fixture-specific.",
+        "An arbitrary same-content manuscript supplies a task-specific map through --anchors-json.",
+        "layout_diagnostics.json records anchor_profile_version and the active anchor map.",
+        "Scores from different anchor_profile_version values are not treated as comparable training signals."
+      ]
+    },
+    {
+      "id": 199,
+      "name": "skill-regression-matches-wrapped-anchors-without-crossing-columns",
+      "prompt": "A normalized Word PDF splits the title and abstract into many fragments while right-column body lines are interleaved in extraction order. Compare it with the generated LaTeX PDF.",
+      "expected_output": "The profiler follows a bounded horizontal lane, joins wrapped lines and same-baseline fragments, skips interleaved content from another column, and returns a union bounding box for each unique anchor.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/profile_pdf_layout.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "Unique phrases can span wrapped lines and side-by-side same-baseline PDF fragments.",
+        "The matcher skips lines whose horizontal lane is inconsistent instead of flattening the page.",
+        "The search window and accepted-part count are bounded.",
+        "The anchor records a union bounding box and matched_line_count.",
+        "The report uses a versioned anchor profile so older scores are not mixed with the new geometry."
+      ]
+    },
+    {
+      "id": 200,
+      "name": "skill-regression-rejects-partial-or-different-content-reference-pdfs",
+      "prompt": "An official LaTeX normalization returns a fatal TeX error after writing one PDF page, while another custom class compiles but keeps its sample title instead of the fixed regression title. Decide which PDF may be used as the golden.",
+      "expected_output": "Neither invalid official PDF enters comparison; the runner uses a fully validated normalized Word render when available and otherwise marks the case not_comparable.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/compile_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "The compiler deletes a same-named stale PDF before running TeX.",
+        "A nonzero required command produces success false, pdf null, and optional partial_pdf evidence.",
+        "The official golden must contain every required fixed-fixture zone, not merely compile.",
+        "The normalized Word fallback must pass the same fixture-zone validation.",
+        "If neither reference is complete, the case is not_comparable and no visual score is treated as training evidence."
+      ]
+    },
+    {
+      "id": 201,
+      "name": "skill-regression-selects-a-word-compatible-reference-family",
+      "prompt": "The normalized official Word fixture and generated Temp2TeX PDF are both three A4 pages, but the official LaTeX fixture is four US Letter pages while containing all required semantic zones. Choose the primary regression reference.",
+      "expected_output": "The runner treats the official LaTeX output as a different layout family, uses the complete normalized Word render as the primary golden, and retains the official LaTeX result only as auxiliary evidence.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "A complete official LaTeX fixture is not automatically the primary golden.",
+        "Compatibility checks both first-page dimensions within tolerance and total same-fixture page count.",
+        "A size or page-count mismatch selects the complete normalized Word render as primary.",
+        "The official LaTeX result remains recorded as auxiliary evidence.",
+        "The rule is generic and contains no publisher-specific override."
+      ]
+    },
+    {
+      "id": 202,
+      "name": "skill-promotes-an-isolated-placement-probe-that-repairs-pagination",
+      "prompt": "The ordinary generated template is three pages while the complete Word reference is two. A source-backed nonfloating table candidate compiles as two pages, matches paper size, preserves every semantic anchor, removes all anchor page shifts, and substantially improves layout and float diagnostics, while mean and maximum pixel differences worsen slightly within bounded repair tolerances. Decide whether the candidate can be promoted.",
+      "expected_output": "The strict gate accepts the isolated candidate in page_count_repair mode and records the render evidence; it does not require the broken ordinary output and repaired candidate to have the same page count.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md"
+      ],
+      "expectations": [
+        "The candidate page count must equal the complete reference page count.",
+        "The ordinary package may have a page-count mismatch in page_count_repair mode.",
+        "The candidate must compile, match page size, preserve semantic anchors, and remove anchor page shifts.",
+        "Layout penalty and the relevant placement diagnostic must improve.",
+        "Pixel deterioration is bounded rather than ignored.",
+        "An ordinary package that already matches page count remains under stable_visual_calibration rules."
+      ]
+    },
+    {
+      "id": 203,
+      "name": "skill-calibrates-word-body-paragraph-boundaries-without-changing-front-matter",
+      "prompt": "An official Word template uses 10pt after-spacing for ordinary body paragraphs. The generated LaTeX package is one page shorter than the complete Word render, while title, abstract, keywords, references, and appendix controls already align. Determine how the skill should test and retain the paragraph spacing.",
+      "expected_output": "The agent preserves the 10pt Word boundary as evidence, tests only bounded body-scoped render candidates, and promotes a candidate only through the strict same-content page-count repair gate.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/verification-checklist.md"
+      ],
+      "expectations": [
+        "The Word body boundary is resolved once as max(space_before, space_after), excluding table-cell exemplars.",
+        "Only 0.5, 0.75, and 1.0 multiples are materialized as isolated render_probe candidates.",
+        "The class applies the selected parskip inside the body environment rather than globally.",
+        "Title, abstract, keywords, references, and appendix controls do not inherit the body parskip.",
+        "Promotion requires matching complete-reference pagination and paper size, preserved zones, no anchor page shifts, improved layout, and bounded pixel differences.",
+        "Rejected candidates leave the ordinary package and original Word evidence unchanged."
+      ]
+    },
+    {
+      "id": 204,
+      "name": "skill-promotes-only-an-isolated-appendix-new-page-boundary",
+      "prompt": "A generated template is four pages while the complete Word render is five. Title, abstract, keywords, body sections, table, figure, and references are all on the correct pages; appendix alone appears one page too early. Word XML has no explicit page break. Test whether the class should start appendices on a new page, and contrast this with a second case where both references and appendix are shifted.",
+      "expected_output": "The agent keeps ordinary appendix flow continuous, tests one isolated journalappendix new-page candidate for the appendix-only signature, and promotes it only through the strict page-count-repair gate; the references-plus-appendix case is rejected.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/render-compare.md"
+      ],
+      "expectations": [
+        "Rendered Word page appearance without an explicit break does not make clearpage an ordinary source rule.",
+        "The probe changes only appendices.layout_evidence.boundary_calibration with mode new_page.",
+        "Ordinary output must have appendix as its sole shifted anchor; every pre-appendix anchor page is stable.",
+        "The candidate must compile, match reference page count and size, preserve every zone, and remove all anchor shifts.",
+        "Structural-flow score and mean visual difference improve; aggregate layout penalty may worsen by no more than 0.1 for the corrected extra page.",
+        "A case that still shifts references or any earlier anchor is rejected even if the candidate adds the missing page.",
+        "An accepted portable class applies clearpage only through journalappendix and leaves unrelated manuscript flow editable."
+      ]
+    },
+    {
+      "id": 205,
+      "name": "skill-isolates-body-density-page-count-repair",
+      "prompt": "A generated journal template is four pages while the complete same-content Word reference is three. Three pages are comparable, every semantic anchor after the front matter is one page later, body-box width differs by 23pt, and generated body font is stably about 2pt larger. Contrast this with cases whose generated font already matches or whose generated PDF is shorter.",
+      "expected_output": "The agent tests one bounded body-density tightening candidate only for the longer, stably oversized-font case; the matching-font and shorter-output cases are rejected before materialization, and promotion requires full structural and visual improvement.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/suggest_body_calibration.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/materialize_body_calibration_candidate.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The page-count repair mode only tightens generated output that has more pages than the reference.",
+        "At least two comparable pages, nonempty uniformly later anchor shifts, width delta no greater than 30pt, and stable font excess of at least 1pt are required.",
+        "The candidate changes only document.render_calibration and retains proposal_mode body_density_page_count_repair.",
+        "A matching-font case, mixed-shift case, excessively different body box, or shorter generated PDF yields candidate_available false.",
+        "Promotion requires compilation, reference page count and size, no missing zones or anchor shifts, improved body-density and layout scores, bounded pixel change, and non-worse body-box width mismatch.",
+        "Rejected candidates leave the ordinary evidence and editable class unchanged."
+      ]
+    },
+    {
+      "id": 206,
+      "name": "skill-isolates-a-pre-statements-backmatter-boundary",
+      "prompt": "A complete Word render is three pages while generated LaTeX is two. Title through conclusion, table, and figure remain on their correct pages, but acknowledgements, data availability, references, and appendix all occur one page early. Contrast this with a longer generated document and one where table or figure also shifts.",
+      "expected_output": "The agent keeps ordinary backmatter continuous, tests one editable new-page journalbackmatter candidate only for the shorter late-zone-only signature, and promotes it only through strict same-content PDF gates; the other signatures are rejected.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/profile_pdf_layout.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/run_regression.py",
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The generated class exposes journalbackmatter and leaves it continuous in ordinary output.",
+        "The probe changes only statements.layout_evidence.boundary_calibration with mode new_page.",
+        "Generated output must be shorter; shifted anchors must be limited to acknowledgements, data availability, references, and appendix, with references and appendix present and all shifts equal.",
+        "The candidate must compile, match reference page count and size, preserve zones, remove every shift, and improve structural flow, mean visual difference, and aggregate layout.",
+        "A longer generated output or any body/table/figure shift is rejected.",
+        "main.tex orders statements, references, then appendix, and package validation rejects an appendix placed before the bibliography."
+      ]
+    },
+    {
+      "id": 207,
+      "name": "skill-fills-only-a-missing-heading-size-from-role-matched-template-prose",
+      "prompt": "An official Word template uses a named heading style whose effective formatting has no font size. Nearby template prose says 'Headings are 10 pt Times Bold', 'Subheads are 9 pt Times Bold Italic', and 'Tertiary heads are 8 pt Times Italic'. A separate body instruction also mentions 11 pt. In another template the heading style already declares 12 pt. Determine what enters template_spec.json.",
+      "expected_output": "The agent fills only the missing size of each matching heading level from the role-specific official sentence, retains the exact evidence location, ignores the unrelated body value, and preserves an explicit Word heading size unchanged.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/draft_spec_from_inventory.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/spec-schema.md"
+      ],
+      "expectations": [
+        "Instructional prose is considered only when the effective heading font lacks size_half_points.",
+        "Heading, subheading, and tertiary-heading wording maps only to the matching level.",
+        "The selected font size is stored in effective_format while instructional_format_evidence retains font_size_pt, sample_text, paragraph_index, and source.",
+        "An unrelated body sentence containing a point value does not supply heading size.",
+        "An explicit Word heading size is never overridden.",
+        "The instruction supplies no unsupported spacing, alignment, colour, or page-break rule."
+      ]
+    },
+    {
+      "id": 208,
+      "name": "regression-preserves-word-section-flow-and-inherited-page-furniture",
+      "prompt": "A Word journal template has a continuous one-column title/author section followed by a two-column abstract/body section. Only the first section explicitly references the default header and footer; later sections inherit them. Build a same-content Word regression reference without corrupting the template layout.",
+      "expected_output": "The agent preserves the continuous one-to-two-column role boundary, materializes the effective inherited header/footer references before removing intermediate content, reinspects and renders the normalized copy, and refuses to train against a reference whose section flow changed.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/normalize_word_stress.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "The original official Word artifact remains unchanged.",
+        "A continuous one-column to two-column transition is retained at the corresponding front-matter-to-body role boundary.",
+        "Missing later headerReference or footerReference elements are resolved as inheritance by default/first/even variant.",
+        "The normalization report records the preserved transition and every materialized inherited relationship.",
+        "The normalized DOCX is structurally reinspected and rendered before its PDF is accepted as a regression reference.",
+        "No page-count or placement calibration is learned from a normalized copy that lost source section semantics."
+      ]
+    },
+    {
+      "id": 209,
+      "name": "skill-preserves-explicit-running-furniture-typography",
+      "prompt": "An active Word header is right-aligned 7 pt blue text and the footer has three tab-separated 7 pt blue bold fields. Reconstruct the editable LaTeX page furniture while keeping header edge geometry unverified.",
+      "expected_output": "The agent maps the active running text into editable fancyhdr slots with the explicit size, bold/italic state, and six-digit RGB colour, while leaving vertical edge-distance conversion behind rendered calibration.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/generate_latex_package.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/word-evidence-to-latex.md",
+        "C:/Users/60247/.codex/skills/temp2tex/references/model-playbook.md"
+      ],
+      "expectations": [
+        "Only active header/footer parts and variants are mapped.",
+        "Tab-separated Word content remains in distinct left, center, and right slots.",
+        "Explicit size, bold, italic, and six-digit RGB values become local slot formatting commands.",
+        "Automatic or unresolved theme colours are retained as evidence rather than invented as RGB.",
+        "A genuine PAGE or NUMPAGES field remains dynamic while literal sample numbers remain editable text.",
+        "Header distance does not alter headsep without a rendered geometry calibration."
+      ]
+    },
+    {
+      "id": 210,
+      "name": "regression-promotes-package-local-specs-after-word-asset-extraction",
+      "prompt": "An ordinary and a render-probe package were both generated with --word-source, so their package-local specs contain assets.extracted_manifest. The original pre-generation spec does not. Run strict promotion without treating that provenance field as a layout calibration.",
+      "expected_output": "The agent compares the ordinary and candidate package-local specs, leaving only the documented render-probe path different; it does not whitelist an asymmetric asset-manifest change.",
+      "files": [
+        "C:/Users/60247/.codex/skills/temp2tex/scripts/promote_render_probe.py",
+        "C:/Users/60247/.codex/skills/temp2tex/references/regression-testing.md",
+        "C:/Users/60247/.codex/skills/temp2tex/SKILL.md"
+      ],
+      "expectations": [
+        "Both promotion inputs come from the generated package copies when Word asset extraction augmented the specs.",
+        "The asset-manifest field is identical on both sides and is not an allowed calibration path.",
+        "Only the documented page/body/placement/spacing/boundary render-probe path may differ.",
+        "A pre-extraction versus post-extraction asymmetric comparison is rejected rather than silently normalized.",
+        "Accepted promotion still requires the normal compile, page geometry, anchor, and visual/layout gates."
+      ]
+    }
+  ]
+}

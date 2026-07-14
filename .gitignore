@@ -1,0 +1,26 @@
+# Python and editor state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.idea/
+
+# Local rendering and regression outputs
+output/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.synctex.gz
+
+# Downloaded publisher sources and generated corpora
+temp2tex-regression-corpus/
+official_sources/
+layout_profile/
+diff_previews/

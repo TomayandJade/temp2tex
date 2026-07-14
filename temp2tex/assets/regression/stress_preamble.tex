@@ -1,0 +1,24 @@
+\makeatletter
+\@ifpackageloaded{graphicx}{}{\usepackage{graphicx}}
+\@ifpackageloaded{booktabs}{}{\usepackage{booktabs}}
+\@ifpackageloaded{array}{}{\usepackage{array}}
+\@ifpackageloaded{amsmath}{}{\usepackage{amsmath}}
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\@ifpackageloaded{subcaption}{}{\usepackage{subcaption}}
+\@ifpackageloaded{threeparttable}{}{\usepackage{threeparttable}}
+\makeatother
+
+\providecommand{\tempTwoTexKeywords}[1]{\par\noindent\textbf{Keywords:} #1\par}
+\providecommand{\tempTwoTexAbstractBegin}{}
+\providecommand{\tempTwoTexAbstractEnd}{}
+\providecommand{\tempTwoTexBodyBegin}{}
+\providecommand{\tempTwoTexBodyEnd}{}
+
+% Keep the normalized front matter comparable across official classes. Classes
+% with no affiliation macro receive the affiliation as a second author line;
+% source-aware generated classes can render it through their own interface.
+\makeatletter
+\@ifundefined{affiliation}{%
+  \newcommand{\affiliation}[1]{\g@addto@macro\@author{\\#1}}%
+}{}
+\makeatother

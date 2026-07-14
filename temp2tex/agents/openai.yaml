@@ -1,0 +1,4 @@
+interface:
+  display_name: "Temp2TeX"
+  short_description: "Rebuild journal Word templates as editable LaTeX packages"
+  default_prompt: "Use $temp2tex to convert this official journal Word template into an Overleaf-ready LaTeX package with journal-template.cls, main.tex, evidence records, and a verification plan. Compare rendered PDFs only when source files and tools are available."

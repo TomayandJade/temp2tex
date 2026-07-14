@@ -7,12 +7,12 @@
 `temp2tex` is a Codex skill for rebuilding an editable LaTeX journal template
 from an official Word author template and related publisher guidance.
 
-It is intended for `.doc`, `.docx`, `.docm`, `.dot`, `.dotx`, and `.dotm`
-templates. Supporting evidence may include author instructions, sample PDFs,
+It supports the **DOC**, **DOCX**, **DOCM**, **DOT**, **DOTX**, and **DOTM**
+Microsoft Word template formats. Supporting evidence may include author instructions, sample PDFs,
 reference rules, artwork requirements, and official website assets.
 
-The default result is a class-based, Overleaf-ready package built around
-`journal-template.cls` and `main.tex`.
+The default result is a class-based, Overleaf-ready package built around the
+**journal-template.cls** class and **main.tex** entry document.
 
 ### Capabilities
 
@@ -28,16 +28,16 @@ The default result is a class-based, Overleaf-ready package built around
 
 ### Installation
 
-Install the source directory by placing `temp2tex/` at:
+Install the source directory by placing **temp2tex/** at:
 
 ```text
 <CODEX_HOME>/skills/temp2tex/
 ```
 
-The directory must contain `SKILL.md` at its root. Start a new Codex session
+The directory must contain **SKILL.md** at its root. Start a new Codex session
 after installation so the skill can be discovered.
 
-Alternatively, download `temp2tex-v0.1.0.skill` from the
+Alternatively, download **temp2tex-v0.1.0.skill** from the
 [v0.1.0 release](https://github.com/Tomay-hedondism/temp2tex/releases/tag/v0.1.0)
 and extract it into the same location.
 
@@ -102,9 +102,9 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 
 `temp2tex` 是一个 Codex skill，用于依据期刊官方 Word 投稿模板及相关作者指南，重建可编辑的 LaTeX 期刊模板。
 
-它适用于 `.doc`、`.docx`、`.docm`、`.dot`、`.dotx` 和 `.dotm` 模板。辅助证据可以包括作者指南、样刊 PDF、参考文献规则、图片规范和官网素材。
+它支持 **DOC**、**DOCX**、**DOCM**、**DOT**、**DOTX** 和 **DOTM** 格式的 Microsoft Word 模板。辅助证据可以包括作者指南、样刊 PDF、参考文献规则、图片规范和官网素材。
 
-默认交付为适配 Overleaf 的类文件结构，以 `journal-template.cls` 和 `main.tex` 为核心。
+默认交付为适配 Overleaf 的类文件结构，以 **journal-template.cls** 类文件和 **main.tex** 主文档为核心。
 
 ### 能力范围
 
@@ -116,16 +116,16 @@ This project is licensed under the [Apache License 2.0](LICENSE).
 
 ### 安装
 
-将源目录 `temp2tex/` 放入以下位置：
+将源目录 **temp2tex/** 放入以下位置：
 
 ```text
 <CODEX_HOME>/skills/temp2tex/
 ```
 
-该目录根部必须包含 `SKILL.md`。安装后请新建一个 Codex 会话，使系统发现该 skill。
+该目录根部必须包含 **SKILL.md**。安装后请新建一个 Codex 会话，使系统发现该 skill。
 
 也可以从 [v0.1.0 release](https://github.com/Tomay-hedondism/temp2tex/releases/tag/v0.1.0)
-下载 `temp2tex-v0.1.0.skill`，并解压到相同位置。
+下载 **temp2tex-v0.1.0.skill**，并解压到相同位置。
 
 ### 典型用法
 

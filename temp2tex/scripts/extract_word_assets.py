@@ -149,6 +149,10 @@ def embedded_ids(archive: zipfile.ZipFile, part: str) -> list[str]:
         rel_id = blip.attrib.get(f"{{{DOC_R_NS}}}embed")
         if rel_id:
             ids.append(rel_id)
+    for image in root.findall(".//{urn:schemas-microsoft-com:vml}imagedata"):
+        rel_id = image.attrib.get(f"{{{DOC_R_NS}}}id")
+        if rel_id:
+            ids.append(rel_id)
     return ids
 
 

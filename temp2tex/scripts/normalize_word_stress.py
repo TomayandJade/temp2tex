@@ -68,6 +68,49 @@ RESULTS_TEXT = (
 )
 EQUATION_TEXT = "I = (sum from i=1 to n of w_i x_i) / (sum from i=1 to n of w_i)"
 
+# Keep Chinese regression bodies language-consistent. These strings are
+# verification fixtures, not reconstructed manuscript content.
+CJK_TITLE = "中文期刊模板回归验证稿"
+CJK_ABSTRACT = "摘要：本验证稿用于检查中文期刊模板的题名、作者、摘要、关键词、标题层级、图表、公式、脚注、参考文献和附录版式。"
+CJK_KEYWORDS = "关键词：期刊模板；LaTeX；Word；版式验证"
+CJK_SECTIONS = [
+    ("模板验证样稿", "本段用于检查正文、首行缩进、行距、引文和交叉引用。文本长度足以发生换行，从而观察中文正文的宽度与段落密度。"),
+    ("方法", "本节包含公式及其说明，用于检查公式上下间距和编号位置。"),
+    ("公式、表格与图片", "表 1 用于检查题注位置、表格线、表注、对齐和单元格结构。"),
+    ("结果", "结果段落用于检查图表与公式引用、图文间距及正文续排。"),
+    ("讨论", "讨论段落用于检查标题后的正文间距、浮动体后的续排，以及页眉页脚和页边距的保持。"),
+    ("结论", "此固定验证稿不是学术论文，用于比较 Word 模板与生成 LaTeX 模板的版式行为。"),
+]
+CJK_SECOND_LEVEL_TEXT = "本节检查二级标题间距、段落缩进和正文行宽。"
+CJK_THIRD_LEVEL_TEXT = "本节检查三级标题格式。"
+CJK_RESULTS_TEXT = "参见表 1、图 1、图 2 与公式 (1)。该段落用于检查长文本换行、图表引用和中文标点的排版行为。"
+
+# This profile mirrors the editable CJK fixture emitted by
+# generate_latex_package.py. It is deliberately separate from the broader
+# stress fixture above: PDF comparison must not mistake content changes for
+# template-layout differences.
+CJK_LATEX_DEFAULT = {
+    "title": "中文论文标题",
+    "author": "第一作者；第二作者",
+    "affiliation_1": "模板工程系，示例大学",
+    "affiliation_2": "可复现排版学院，示例研究院",
+    "abstract": "摘要：请在此填写中文摘要；如期刊要求双语摘要，请在中文摘要后添加英文摘要。",
+    "keywords": "关键词：关键词一；关键词二；关键词三",
+    "english_title": "English Title of the Manuscript",
+    "english_author": "First Author; Second Author",
+    "english_affiliation": "Department of Template Engineering, Example University",
+    "english_abstract": "Abstract: Replace with the English abstract when the official template requires bilingual abstracts.",
+    "english_keywords": "Keywords: keyword one; keyword two; keyword three",
+    "intro": "此可编辑样稿用于检查正文、缩进、引文和交叉引用。其中包含一个脚注",
+    "footnote": "示例脚注。",
+    "second_check": "检查二级标题的间距。",
+    "third_check": "检查三级标题的格式。",
+    "result": "参见表 1、图 1 与公式 (1)；引用 [1]。",
+    "reference": "[1] Author A. Sample reference placeholder. Journal Name. 2026;1(1):1-10.",
+    "appendix_title": "A 附录验证样稿",
+    "appendix_intro": "官方源文件未提供附录证据，此可编辑样稿用于验证附录计数器。",
+}
+
 
 def normalize_name(value: str) -> str:
     return " ".join(value.lower().replace("_", " ").replace("-", " ").split())
@@ -358,6 +401,14 @@ def add_paragraph(doc: Document, text: str, style, source=None) -> object:
 def direct_role_samples(doc: Document) -> dict[str, object]:
     """Find visible role exemplars for templates that do not use Word styles."""
     paragraphs = [paragraph for paragraph in doc.paragraphs if paragraph.text.strip()]
+    abstract_index = next(
+        (
+            index
+            for index, paragraph in enumerate(paragraphs, 1)
+            if paragraph.text.strip().lower().startswith(("abstract", "摘要", "中文摘要", "英文摘要"))
+        ),
+        None,
+    )
 
     def first(predicate):
         return next((paragraph for index, paragraph in enumerate(paragraphs, 1) if predicate(paragraph.text.strip(), index)), None)
@@ -365,7 +416,11 @@ def direct_role_samples(doc: Document) -> dict[str, object]:
     affiliation_markers = ("university", "college", "institute", "laboratory", "department", "\u5927\u5b66", "\u5b66\u9662", "\u7814\u7a76\u6240", "\u5b9e\u9a8c\u5ba4", "\u5355\u4f4d", "\u90ae\u7f16")
     def is_affiliation(text: str) -> bool:
         return any(marker in text.lower() for marker in affiliation_markers)
-    def heading_level(text: str):
+    def heading_level(text: str, index: int):
+        # Chinese templates often number affiliations before the abstract.
+        # Those lines are front matter, never body heading exemplars.
+        if abstract_index is not None and index < abstract_index:
+            return None
         import re
         match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?[.)]?\s+\S+", text)
         if not match or is_affiliation(text):
@@ -377,8 +432,15 @@ def direct_role_samples(doc: Document) -> dict[str, object]:
     keywords = first(lambda text, index: text.lower().startswith(("keyword", "key word")) or text.startswith("\u5173\u952e\u8bcd"))
     author = first(lambda text, index: index <= 8 and ("," in text or "\uff0c" in text) and not text.startswith(("\u6458\u8981", "\u5173\u952e\u8bcd")))
     affiliation = first(lambda text, index: index <= 16 and is_affiliation(text))
-    body = max((paragraph for paragraph in paragraphs if len(paragraph.text.strip()) >= 80), key=lambda item: len(item.text), default=None)
-    headings = {level: first(lambda text, index, level=level: heading_level(text) == level) for level in range(3)}
+    body_candidates = [
+        paragraph
+        for index, paragraph in enumerate(paragraphs, 1)
+        if (abstract_index is None or index > abstract_index)
+        and len(paragraph.text.strip()) >= 80
+        and not paragraph.text.strip().lower().startswith(("abstract", "摘要", "关键词", "key words", "keywords"))
+    ]
+    body = max(body_candidates, key=lambda item: len(item.text), default=None)
+    headings = {level: first(lambda text, index, level=level: heading_level(text, index) == level) for level in range(3)}
     reference = first(lambda text, index: text.lower() == "references" or text.startswith("\u53c2\u8003\u6587\u732e"))
     return {
         "title": title,
@@ -396,7 +458,16 @@ def direct_role_samples(doc: Document) -> dict[str, object]:
     }
 
 
-def add_placeholder_figure(doc: Document, path: Path, style, *, paired: bool = False) -> None:
+def add_placeholder_figure(
+    doc: Document,
+    path: Path,
+    style,
+    *,
+    paired: bool = False,
+    caption: str | None = None,
+    label: str | None = None,
+    label_separator: str = ". ",
+) -> None:
     try:
         from PIL import Image, ImageDraw
 
@@ -417,12 +488,43 @@ def add_placeholder_figure(doc: Document, path: Path, style, *, paired: bool = F
         paragraph.add_run().add_picture(str(path), width=Inches(4.7))
     except Exception:
         add_paragraph(doc, "[Temp2TeX regression figure placeholder]", style)
-    caption = "Two-panel figure placeholder used for subfigure regression" if paired else "Single-panel figure placeholder used for layout regression"
-    add_paragraph(doc, f"Figure {'2' if paired else '1'}. {caption}", style)
+    caption = caption or ("Two-panel figure placeholder used for subfigure regression" if paired else "Single-panel figure placeholder used for layout regression")
+    caption_label = label or ("图" if caption.startswith("示例") else "Figure")
+    number = "" if label else f" {'2' if paired else '1'}"
+    add_paragraph(doc, f"{caption_label}{number}{label_separator}{caption}", style)
 
 
-def build_normalized_document(source_docx: Path, output: Path, figure_path: Path) -> dict:
+def build_normalized_document(
+    source_docx: Path,
+    output: Path,
+    figure_path: Path,
+    fixture_language: str = "en",
+    fixture_profile: str = "stress",
+) -> dict:
     doc = Document(str(source_docx))
+    is_cjk = fixture_language in {"zh", "mixed"}
+    latex_default_cjk = is_cjk and fixture_profile == "latex-default"
+    title = CJK_LATEX_DEFAULT["title"] if latex_default_cjk else (CJK_TITLE if is_cjk else TITLE)
+    abstract = CJK_LATEX_DEFAULT["abstract"] if latex_default_cjk else (CJK_ABSTRACT if is_cjk else f"Abstract: {ABSTRACT}")
+    keywords = CJK_LATEX_DEFAULT["keywords"] if latex_default_cjk else (CJK_KEYWORDS if is_cjk else f"Keywords: {KEYWORDS}")
+    sections = CJK_SECTIONS if is_cjk else SECTIONS
+    second_level_text = CJK_SECOND_LEVEL_TEXT if is_cjk else SECOND_LEVEL_TEXT
+    third_level_text = CJK_THIRD_LEVEL_TEXT if is_cjk else THIRD_LEVEL_TEXT
+    results_text = CJK_RESULTS_TEXT if is_cjk else RESULTS_TEXT
+    if latex_default_cjk:
+        sections = [
+            ("1 模板验证样稿", CJK_LATEX_DEFAULT["intro"]),
+            ("2 公式、表格与图片", ""),
+            ("3 结果", CJK_LATEX_DEFAULT["result"]),
+            ("4 列表验证", ""),
+        ]
+        second_level_text = CJK_LATEX_DEFAULT["second_check"]
+        third_level_text = CJK_LATEX_DEFAULT["third_check"]
+        results_text = CJK_LATEX_DEFAULT["result"]
+    intro_heading = "1 模板验证样稿" if latex_default_cjk else ("模板验证样稿" if is_cjk else "Introduction")
+    tables_heading = "2 公式、表格与图片" if latex_default_cjk else ("公式、表格与图片" if is_cjk else "Tables and Figures")
+    methods_heading = "方法" if is_cjk else "Methods"
+    results_heading = "3 结果" if latex_default_cjk else ("结果" if is_cjk else "Results")
     original_section_count = len(doc.sections)
     inherited_page_furniture = materialize_inherited_page_furniture(doc)
     column_transition = front_matter_column_transition(doc)
@@ -450,62 +552,107 @@ def build_normalized_document(source_docx: Path, output: Path, figure_path: Path
             direct_copy_decisions[role] = "copied_no_style_guard"
         return add_paragraph(doc, text, target_style, source)
 
-    add_role("title", TITLE)
-    add_role("author", "Alex Example and Blair Example")
-    affiliation_paragraph = add_role("affiliation", "Department of Template Engineering, Example University; alex.example@example.org")
+    add_role("title", title)
+    author_text = CJK_LATEX_DEFAULT["author"] if latex_default_cjk else ("张三，李四" if is_cjk else "Alex Example and Blair Example")
+    affiliation_text = CJK_LATEX_DEFAULT["affiliation_1"] if latex_default_cjk else ("模板工程系，示例大学，北京 100000" if is_cjk else "Department of Template Engineering, Example University; alex.example@example.org")
+    affiliation_paragraph = add_role("author", author_text)
+    affiliation_paragraph = add_role("affiliation", affiliation_text)
+    if latex_default_cjk:
+        affiliation_paragraph = add_role("affiliation", CJK_LATEX_DEFAULT["affiliation_2"])
     transition_attached = attach_section_break(affiliation_paragraph, column_transition)
-    add_role("abstract", f"Abstract: {ABSTRACT}")
-    add_role("keywords", f"Keywords: {KEYWORDS}")
+    add_role("abstract", abstract)
+    add_role("keywords", keywords)
+    if fixture_language == "mixed":
+        add_role("title", CJK_LATEX_DEFAULT["english_title"] if latex_default_cjk else "English Title of the Regression Manuscript")
+        add_role("author", CJK_LATEX_DEFAULT["english_author"] if latex_default_cjk else "Zhang San; Li Si")
+        add_role("affiliation", CJK_LATEX_DEFAULT["english_affiliation"] if latex_default_cjk else "Department of Template Engineering, Example University, Beijing 100000, China")
+        add_role("abstract", CJK_LATEX_DEFAULT["english_abstract"] if latex_default_cjk else "Abstract: This regression fixture checks bilingual front matter and journal layout behavior.")
+        add_role("keywords", CJK_LATEX_DEFAULT["english_keywords"] if latex_default_cjk else "Key words: journal template; LaTeX; Word; layout verification")
 
-    for heading, text in SECTIONS:
+    for heading, text in sections:
         add_role("heading1", heading)
         paragraph = add_role("body", text)
-        if heading == "Introduction":
+        if heading == intro_heading:
             marker = paragraph.add_run("1")
             marker.font.superscript = True
-            add_role("footnote", "1 This footnote is part of the fixed regression body.")
-        if heading == "Introduction":
-            add_role("heading2", "Second-level heading")
-            add_role("body", SECOND_LEVEL_TEXT)
-            add_role("heading3", "Third-level heading")
-            add_role("body", THIRD_LEVEL_TEXT)
-        if heading == "Tables and Figures":
-            add_role("caption", "Table 1. Regression table with a note and a merged cell")
-            table = doc.add_table(rows=4, cols=3)
+            add_role("footnote", CJK_LATEX_DEFAULT["footnote"] if latex_default_cjk else ("1 此脚注属于固定中文回归样稿。" if is_cjk else "1 This footnote is part of the fixed regression body."))
+        if heading == intro_heading:
+            add_role("heading2", "1.1 二级标题" if latex_default_cjk else ("二级标题" if is_cjk else "Second-level heading"))
+            add_role("body", second_level_text)
+            add_role("heading3", "1.1.1 三级标题" if latex_default_cjk else ("三级标题" if is_cjk else "Third-level heading"))
+            add_role("body", third_level_text)
+            if latex_default_cjk:
+                add_role("heading3", "四级标题")
+                add_role("body", "行内文字。")
+                add_role("heading3", "五级标题")
+                add_role("body", "行内文字。")
+        if heading == tables_heading:
+            add_role("caption", "表 1: 带表注的示例表" if latex_default_cjk else ("表 1. 带表注的回归验证表" if is_cjk else "Table 1. Regression table with a note and a merged cell"))
+            table = doc.add_table(rows=3 if latex_default_cjk else 4, cols=3)
             if original_table_style:
                 try:
                     table.style = original_table_style
                 except Exception:
                     pass
-            values = [
-                ("Format element", "Expected stress", "Evidence target"),
-                ("Merged-cell row", "", "table structure"),
-                ("Heading levels", "section to subsubsection", "text hierarchy"),
-                ("Figures", "single and paired panels", "caption layout"),
-            ]
+            values = (
+                [("Column A", "Column B", "Column C"), ("Merged cells", "", "Value"), ("Item 1", "Item 2", "Item 3")]
+                if latex_default_cjk
+                else [
+                    ("Format element", "Expected stress", "Evidence target"),
+                    ("Merged-cell row", "", "table structure"),
+                    ("Heading levels", "section to subsubsection", "text hierarchy"),
+                    ("Figures", "single and paired panels", "caption layout"),
+                ]
+            )
             for row, values_row in zip(table.rows, values):
                 for cell, value in zip(row.cells, values_row):
                     cell.text = value
-            add_role("caption", "Note: the table intentionally includes a note below the tabular block.")
-            add_placeholder_figure(doc, figure_path, styles["caption"])
-            add_placeholder_figure(doc, figure_path.with_name("paired-figure-placeholder.png"), styles["caption"], paired=True)
-        if heading == "Methods":
+            add_role("caption", "示例表注。" if latex_default_cjk else ("注：本表用于检查表注位置。" if is_cjk else "Note: the table intentionally includes a note below the tabular block."))
+            if latex_default_cjk:
+                add_role("body", "E = mc2")
+            add_placeholder_figure(doc, figure_path, styles["caption"], caption="示例图片占位符" if latex_default_cjk else None, label_separator=": " if latex_default_cjk else ". ")
+            if not latex_default_cjk:
+                add_placeholder_figure(doc, figure_path.with_name("paired-figure-placeholder.png"), styles["caption"], paired=True)
+        if heading == methods_heading:
             add_role("body", EQUATION_TEXT)
-        if heading == "Results":
+        if heading == results_heading:
             # Replace the generic section text with the same content ordering
             # used by the LaTeX stress body.
-            paragraph.text = RESULTS_TEXT
+            paragraph.text = results_text
             paragraph.style = styles["body"]
+        if latex_default_cjk and heading == "4 列表验证":
+            add_role("body", "1. 请替换为可编辑的列表项。")
+            add_role("body", "2. 请与原模板对照列表缩进。")
 
-    add_role("heading1", "Acknowledgements")
-    add_role("body", "The authors thank the template maintainers. No external funding was used.")
-    add_role("heading1", "Data Availability")
-    add_role("body", "All data in this manuscript are placeholders created for template regression testing.")
-    add_role("heading1", "References")
-    add_role("reference", "Author A, Author B. Template regression testing for journal manuscript formats. Journal Formatting Methods. 2026;1:1-10.")
-    add_role("heading1", "Appendix")
-    add_role("heading2", "Appendix Regression Checks")
-    add_role("body", "The appendix verifies appendix heading behavior and numbering after the reference section.")
+    if not latex_default_cjk:
+        add_role("heading1", "致谢" if is_cjk else "Acknowledgements")
+        add_role("body", "感谢模板维护人员。本样稿不涉及外部经费。" if is_cjk else "The authors thank the template maintainers. No external funding was used.")
+        add_role("heading1", "数据可用性" if is_cjk else "Data Availability")
+        add_role("body", "本样稿中的数据均为模板回归验证占位内容。" if is_cjk else "All data in this manuscript are placeholders created for template regression testing.")
+    add_role("heading1", "参考文献" if is_cjk else "References")
+    add_role("reference", CJK_LATEX_DEFAULT["reference"] if latex_default_cjk else ("张三，李四. 中文期刊模板回归验证方法. 科技期刊排版. 2026, 1(1): 1-10." if is_cjk else "Author A, Author B. Template regression testing for journal manuscript formats. Journal Formatting Methods. 2026;1:1-10."))
+    if latex_default_cjk:
+        add_role("heading1", CJK_LATEX_DEFAULT["appendix_title"])
+        add_role("body", CJK_LATEX_DEFAULT["appendix_intro"])
+        add_role("body", "a + b = c (A.1)")
+        add_role("caption", "表 A.1: 附录表格验证")
+        appendix_table = doc.add_table(rows=2, cols=2)
+        appendix_table.rows[0].cells[0].text = "项目"
+        appendix_table.rows[0].cells[1].text = "值"
+        appendix_table.rows[1].cells[0].text = "附录证据"
+        appendix_table.rows[1].cells[1].text = "可编辑"
+        add_placeholder_figure(
+            doc,
+            figure_path.with_name("appendix-figure-placeholder.png"),
+            styles["caption"],
+            caption="附录图片验证",
+            label="图 A.1",
+            label_separator=": ",
+        )
+    else:
+        add_role("heading1", "附录" if is_cjk else "Appendix")
+        add_role("heading2", "附录验证" if is_cjk else "Appendix Regression Checks")
+        add_role("body", "附录用于验证参考文献后的附录标题和编号行为。" if is_cjk else "The appendix verifies appendix heading behavior and numbering after the reference section.")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output))
@@ -515,6 +662,8 @@ def build_normalized_document(source_docx: Path, output: Path, figure_path: Path
     return {
         "success": output.exists(),
         "output": str(output),
+        "fixture_language": fixture_language,
+        "fixture_profile": fixture_profile,
         "original_section_count": original_section_count,
         "inherited_page_furniture": inherited_page_furniture,
         "section_flow_preservation": {
@@ -533,6 +682,8 @@ def main() -> int:
     parser.add_argument("source")
     parser.add_argument("--output", required=True)
     parser.add_argument("--report", required=True)
+    parser.add_argument("--fixture-language", choices=["en", "zh", "mixed"], default="en")
+    parser.add_argument("--fixture-profile", choices=["stress", "latex-default"], default="stress")
     args = parser.parse_args()
 
     source = Path(args.source).expanduser().resolve()
@@ -552,7 +703,7 @@ def main() -> int:
                 source_docx, conversion = convert_to_docx(source, Path(tmp))
                 report["conversion"] = conversion
                 if source_docx:
-                    report.update(build_normalized_document(source_docx, output, output.parent / "figure-placeholder.png"))
+                    report.update(build_normalized_document(source_docx, output, output.parent / "figure-placeholder.png", args.fixture_language, args.fixture_profile))
         except Exception as exc:
             report["error"] = f"{type(exc).__name__}: {exc}"
     report_path.parent.mkdir(parents=True, exist_ok=True)

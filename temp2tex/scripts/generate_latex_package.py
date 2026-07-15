@@ -10,6 +10,7 @@ import re
 import shutil
 from pathlib import Path
 
+from audit_source_feature_coverage import build_coverage
 from extract_word_assets import extract_assets
 
 
@@ -36,10 +37,12 @@ __FONT_SETUP__
 \RequirePackage{titlesec}
 \RequirePackage{fancyhdr}
 \RequirePackage{etoolbox}
+__HEADING_PAGINATION_PACKAGE__
 \RequirePackage{lastpage}
 \RequirePackage[absolute,overlay]{textpos}
 __UNEQUAL_COLUMNS_PACKAGE__
 \RequirePackage[table]{xcolor}
+\RequirePackage[normalem]{ulem}
 \RequirePackage[hidelinks]{hyperref}
 __CITATION_SETUP__
 __FOOTNOTE_SETUP__
@@ -192,6 +195,7 @@ __SECTION_NUMBERING_SETUP__
 \titlespacing*{\paragraph}{__PARAGRAPH_LEFT_INDENT__}{__PARAGRAPH_BEFORE_SKIP__}{__PARAGRAPH_AFTER_SKIP__}
 \titlespacing*{\subparagraph}{__SUBPARAGRAPH_LEFT_INDENT__}{__SUBPARAGRAPH_BEFORE_SKIP__}{__SUBPARAGRAPH_AFTER_SKIP__}
 \setcounter{secnumdepth}{__SECNUMDEPTH__}
+__HEADING_KEEP_WITH_NEXT_SETUP__
 
 \captionsetup{font=small,labelfont=bf,skip=__CAPTION_SKIP__}
 __TABLE_CAPTION_SETUP__
@@ -220,23 +224,23 @@ __BIBLIOGRAPHY_SETUP__
 \newcommand{\englishkeywords}[1]{\gdef\@tempTwoEnglishKeywords{#1}}
 \newcommand{\printenglishabstract}{%
   \ifx\@tempTwoEnglishAbstract\@empty\else
-    \par\noindent\textbf{Abstract:}\enspace\@tempTwoEnglishAbstract\par
+    \par{__ENGLISH_ABSTRACT_ALIGNMENT__ __ENGLISH_ABSTRACT_FORMAT__ \noindent\textbf{Abstract:}\enspace\@tempTwoEnglishAbstract\par}%
     \ifx\@tempTwoEnglishKeywords\@empty\else
-      \noindent\textbf{Keywords:}\enspace\@tempTwoEnglishKeywords\par
+      {__ENGLISH_KEYWORDS_ALIGNMENT__ __ENGLISH_KEYWORDS_FORMAT__ \noindent\textbf{Keywords:}\enspace\@tempTwoEnglishKeywords\par}%
     \fi
   \fi
 }
 \newcommand{\printenglishfrontmatter}{%
   \ifx\@tempTwoEnglishTitle\@empty\else
     \par\vskip __BILINGUAL_FRONTMATTER_SKIP__%
-    {__TITLE_ALIGNMENT__ __TITLE_FORMAT__ \@tempTwoEnglishTitle\par}%
+    {__ENGLISH_TITLE_ALIGNMENT__ __ENGLISH_TITLE_FORMAT__ \@tempTwoEnglishTitle\par}%
     \ifx\@tempTwoEnglishAuthor\@empty\else
       \vskip __TITLE_AFTER_SKIP__%
-      {__AUTHOR_ALIGNMENT__ __AUTHOR_FORMAT__ \@tempTwoEnglishAuthor\par}%
+      {__ENGLISH_AUTHOR_ALIGNMENT__ __ENGLISH_AUTHOR_FORMAT__ \@tempTwoEnglishAuthor\par}%
     \fi
     \ifx\@tempTwoEnglishAffiliation\@empty\else
       \vskip __AUTHOR_AFTER_SKIP__%
-      {__AFFILIATION_ALIGNMENT__ __AFFILIATION_FORMAT__ \@tempTwoEnglishAffiliation\par}%
+      {__ENGLISH_AFFILIATION_ALIGNMENT__ __ENGLISH_AFFILIATION_FORMAT__ \@tempTwoEnglishAffiliation\par}%
     \fi
   \fi
 }
@@ -553,7 +557,26 @@ def table_header_style_from_spec(spec: dict) -> tuple[str, str, str]:
         return "", r"\textbf", r"\rule{0pt}{0pt}"
     fill = str(layout.get("header_fill") or "").strip()
     row_setup = rf"\rowcolor[HTML]{{{fill}}}" if re.fullmatch(r"[0-9A-Fa-f]{6}", fill) else ""
-    cell_format = r"\textbf" if layout.get("header_bold") else ""
+    font_consensus = layout.get("header_font_consensus")
+    font = layout.get("header_effective_font", {}) if font_consensus is not False else {}
+    font = font if isinstance(font, dict) else {}
+    commands = [r"\normalfont"]
+    try:
+        size = int(font.get("size_half_points")) / 2
+    except (TypeError, ValueError):
+        size = None
+    if size and 6 <= size <= 24:
+        baseline = round(max(size * 1.2, size + 1), 1)
+        commands.append(rf"\fontsize{{{size:g}pt}}{{{baseline:g}pt}}\selectfont")
+    bold_consensus = layout.get("header_bold_consensus")
+    if font.get("bold") is True or bold_consensus is True or (bold_consensus is None and layout.get("header_bold")):
+        commands.append(r"\bfseries")
+    if font.get("italic") is True:
+        commands.append(r"\itshape")
+    color = str(font.get("color") or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9A-Fa-f]{6}", color) and color.upper() not in {"000000", "FFFFFF"}:
+        commands.append(rf"\color[HTML]{{{color.upper()}}}")
+    cell_format = "".join(commands) if len(commands) > 1 else ""
     try:
         height = float(layout.get("header_row_height_twips")) / 20
     except (TypeError, ValueError):
@@ -566,6 +589,43 @@ def equation_environment_from_spec(spec: dict) -> str:
     """Use an unnumbered environment only when the source establishes it."""
     numbering = str(get_nested(spec, "equations.numbering", "")).lower()
     return "equation*" if numbering == "unnumbered" else "equation"
+
+
+def equation_candidate_file(spec: dict) -> str:
+    """Emit source-derived OMML candidates without replacing the editable fixture."""
+    candidates = get_nested(spec, "equations.latex_candidates", [])
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    lines = [
+        "% temp2tex-source-equation-candidates: reconstructed from Word OMML",
+        "% This file is not input by main.tex. Move only render-checked samples into a manuscript.",
+        "",
+    ]
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        index = candidate.get("index", "?")
+        status = str(candidate.get("translation_status") or "not_convertible")
+        latex = str(candidate.get("latex") or "").strip()
+        unsupported = candidate.get("unsupported_nodes", [])
+        lines.append(f"% Word OMML sample {index}; status={status}")
+        if status != "converted" or not latex:
+            details = ", ".join(str(item) for item in unsupported) or "no safe LaTeX candidate"
+            lines.append(f"% Manual translation required: {details}.")
+            if latex:
+                lines.append(f"% Partial candidate: {latex}")
+            lines.append("")
+            continue
+        if candidate.get("display_like"):
+            lines.extend([
+                r"\begin{journalequation}",
+                latex,
+                r"\end{journalequation}",
+            ])
+        else:
+            lines.append(rf"\({latex}\)")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def list_style_from_spec(spec: dict) -> tuple[str, str]:
@@ -718,11 +778,23 @@ def unequal_column_setup(spec: dict) -> tuple[str, str, str, str]:
     return r"\RequirePackage{paracol}", source, left, right
 
 
+def effective_body_style_mode(spec: dict) -> str:
+    """Select a visible-flow body candidate only through verified calibration."""
+    calibration = get_nested(spec, "document.render_calibration", {})
+    if isinstance(calibration, dict) and str(calibration.get("status", "")).lower() in {"render_verified", "verified"}:
+        mode = str(calibration.get("body_style_mode") or "").lower()
+        if mode == "visible_flow_exemplar":
+            return mode
+    # Retain compatibility with older explicit candidate specs. Ordinary source
+    # specs do not set this field; new probes use document.render_calibration.
+    return str(get_nested(spec, "page.source_body_style.render_mode", "")).lower()
+
+
 def effective_body_font_size(spec: dict, default: int | float) -> float:
     """Use a render-calibrated body size only when the evidence says it is verified."""
     source_size = get_nested(spec, "document.font_size_pt", default)
     body_override = get_nested(spec, "page.source_body_style.visible_flow_override_candidate", {})
-    body_mode = str(get_nested(spec, "page.source_body_style.render_mode", "")).lower()
+    body_mode = effective_body_style_mode(spec)
     if body_mode == "visible_flow_exemplar" and isinstance(body_override, dict):
         candidate_size = get_nested(body_override, "effective_format.font.size_half_points", None)
         try:
@@ -763,7 +835,7 @@ def source_body_baseline_pt(spec: dict) -> float | None:
     if not isinstance(role, dict):
         return None
     paragraph = role.get("direct_format", {}).get("paragraph", {})
-    if str(role.get("render_mode") or "").lower() == "visible_flow_exemplar":
+    if effective_body_style_mode(spec) == "visible_flow_exemplar":
         candidate = role.get("visible_flow_override_candidate", {})
         if isinstance(candidate, dict):
             paragraph = candidate.get("direct_format", {}).get("paragraph", paragraph)
@@ -787,13 +859,21 @@ def source_body_parskip(spec: dict) -> str:
         calibrated_points = -1
     if 0 <= calibrated_points <= 72:
         return f"{calibrated_points:g}pt"
+    spacing_evidence = get_nested(spec, "page.body_paragraph_spacing_evidence", {})
+    if isinstance(spacing_evidence, dict) and spacing_evidence.get("status") == "source":
+        try:
+            source_points = float(spacing_evidence.get("paragraph_skip_pt"))
+        except (TypeError, ValueError):
+            source_points = -1
+        if 0 <= source_points <= 72:
+            return f"{source_points:g}pt"
     role = get_nested(spec, "page.source_body_style", {})
     if not isinstance(role, dict) or role.get("evidence_status") in {
         "template_style_candidate", "table_cell_body_exemplar"
     }:
         return "0pt"
     paragraph = role.get("direct_format", {}).get("paragraph", {})
-    if str(role.get("render_mode") or "").lower() == "visible_flow_exemplar":
+    if effective_body_style_mode(spec) == "visible_flow_exemplar":
         candidate = role.get("visible_flow_override_candidate", {})
         if isinstance(candidate, dict):
             paragraph = candidate.get("direct_format", {}).get("paragraph", paragraph)
@@ -811,7 +891,7 @@ def source_body_parskip(spec: dict) -> str:
 
 def effective_body_font_family(spec: dict) -> str | None:
     """Use a visible-body candidate only when its render mode is explicit."""
-    body_mode = str(get_nested(spec, "page.source_body_style.render_mode", "")).lower()
+    body_mode = effective_body_style_mode(spec)
     candidate = get_nested(spec, "page.source_body_style.visible_flow_override_candidate", {})
     if body_mode == "visible_flow_exemplar" and isinstance(candidate, dict):
         value = get_nested(candidate, "effective_format.font.family", None)
@@ -933,6 +1013,31 @@ def section_numbering_setup(spec: dict) -> str:
             r"\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}",
         ])
     return ""
+
+
+def heading_keep_with_next_levels(spec: dict) -> list[tuple[int, str]]:
+    """Return only heading commands explicitly kept with following Word text."""
+    levels = [
+        (0, "section"),
+        (1, "subsection"),
+        (2, "subsubsection"),
+        (3, "paragraph"),
+        (4, "subparagraph"),
+    ]
+    selected = []
+    for level, command in levels:
+        paragraph = role_effective_format(spec, f"body.heading_styles.level{level}").get("paragraph", {})
+        if isinstance(paragraph, dict) and paragraph.get("keep_with_next") is True:
+            selected.append((level, command))
+    return selected
+
+
+def heading_keep_with_next_setup(spec: dict) -> str:
+    """Map Word keepNext to a bounded heading-plus-one-line page constraint."""
+    return "\n".join(
+        rf"\pretocmd{{\{command}}}{{\Needspace{{2\baselineskip}}}}{{}}{{}}"
+        for _, command in heading_keep_with_next_levels(spec)
+    )
 
 
 def header_rule_width(spec: dict) -> str:
@@ -1217,9 +1322,7 @@ def author_rendering(spec: dict) -> str:
 
 
 def role_effective_format(spec: dict, path: str) -> dict:
-    if path == "page.source_body_style" and str(
-        get_nested(spec, "page.source_body_style.render_mode", "")
-    ).lower() == "visible_flow_exemplar":
+    if path == "page.source_body_style" and effective_body_style_mode(spec) == "visible_flow_exemplar":
         candidate = get_nested(spec, "page.source_body_style.visible_flow_override_candidate", {})
         if isinstance(candidate, dict):
             candidate_effective = candidate.get("effective_format") or candidate.get("direct_format") or {}
@@ -1389,8 +1492,17 @@ def footnote_setup(spec: dict) -> str:
     if not get_nested(spec, "footnotes.enabled", False):
         return ""
     direct = role_effective_format(spec, "footnotes.style")
+    marker_style = str(get_nested(spec, "footnotes.marker_style", "") or "")
+    marker_commands = {
+        "alph": r"\alph{footnote}",
+        "Alph": r"\Alph{footnote}",
+        "roman": r"\roman{footnote}",
+        "Roman": r"\Roman{footnote}",
+        "fnsymbol": r"\fnsymbol{footnote}",
+    }
+    marker_setup = marker_commands.get(marker_style)
     if not direct:
-        return ""
+        return rf"\renewcommand{{\thefootnote}}{{{marker_setup}}}" if marker_setup else ""
     font = role_font_command(spec, "footnotes.style")
     paragraph = direct.get("paragraph", {})
     try:
@@ -1415,6 +1527,7 @@ def footnote_setup(spec: dict) -> str:
             rf"\setlength{{\parindent}}{{{first_indent:g}pt}}"
         )
     lines = [
+        *([rf"\renewcommand{{\thefootnote}}{{{marker_setup}}}"] if marker_setup else []),
         rf"\newcommand{{\tempTwoFootnoteFormat}}{{{font}}}",
         r"\makeatletter",
         r"\patchcmd{\@makefntext}{\footnotesize}{\footnotesize\tempTwoFootnoteFormat}{}{}",
@@ -1611,6 +1724,336 @@ def latex_escape(value: str) -> str:
     return "".join(replacements.get(ch, ch) for ch in value)
 
 
+def furniture_span_commands(font: dict) -> str:
+    """Return local TeX commands for one visible Word header/footer span."""
+    if not isinstance(font, dict):
+        return ""
+    commands = [r"\normalfont"]
+    try:
+        size = int(font.get("size_half_points")) / 2
+    except (TypeError, ValueError):
+        size = None
+    if size and 5 <= size <= 24:
+        baseline = round(max(size * 1.2, size + 1), 1)
+        commands.append(rf"\fontsize{{{size:g}pt}}{{{baseline:g}pt}}\selectfont")
+    if font.get("bold") is True:
+        commands.append(r"\bfseries")
+    if font.get("italic") is True:
+        commands.append(r"\itshape")
+    color = str(font.get("color") or "").strip().lstrip("#")
+    if re.fullmatch(r"[0-9A-Fa-f]{6}", color):
+        commands.append(rf"\color[HTML]{{{color.upper()}}}")
+    return "".join(commands) if len(commands) > 1 else ""
+
+
+def decorated_span_text(font: dict, text: str) -> str:
+    """Map visible Word run decorations without flattening surrounding text."""
+    if not isinstance(font, dict) or not text:
+        return text
+    value = text
+    vertical = str(font.get("vertical_align") or "").lower()
+    if vertical == "superscript":
+        value = rf"\textsuperscript{{{value}}}"
+    elif vertical == "subscript":
+        value = rf"\textsubscript{{{value}}}"
+    underline = str(font.get("underline") or "").lower()
+    if underline and underline not in {"none", "0", "false", "off"}:
+        # LaTeX core has one robust editable underline. Preserve the original
+        # OOXML variant in the span ledger even when it was double or words-only.
+        value = rf"\underline{{{value}}}"
+    if font.get("strike") is True or font.get("double_strike") is True:
+        value = rf"\sout{{{value}}}"
+    return value
+
+
+def linked_span_text(text: str, target: object) -> str:
+    """Map a safe external Word hyperlink without treating arbitrary text as a URL."""
+    value = str(target or "").strip()
+    if not re.fullmatch(r"(?:https?://|mailto:)[^\s{}<>]+", value, flags=re.I):
+        return text
+    return rf"\href{{\detokenize{{{value}}}}}{{{text}}}"
+
+
+def furniture_span_at(spans: list[dict], cursor: int) -> dict:
+    for span in spans:
+        try:
+            if int(span.get("start", -1)) <= cursor < int(span.get("end", -1)):
+                return span
+        except (TypeError, ValueError):
+            continue
+    return {}
+
+
+def render_furniture_text(
+    value: str,
+    spans: list[dict],
+    span_text: str,
+    cursor: int,
+) -> tuple[str, int]:
+    """Escape and locally format one Word furniture token from run evidence."""
+    if not value:
+        return "", cursor
+    start = span_text.find(value, cursor)
+    if start < 0:
+        return latex_escape(value), cursor
+    end = start + len(value)
+    pieces = []
+    position = start
+    while position < end:
+        span = furniture_span_at(spans, position)
+        boundary = end
+        if span:
+            try:
+                boundary = min(end, int(span.get("end", end)))
+            except (TypeError, ValueError):
+                boundary = end
+            font = (span.get("effective_format") or {}).get("font", {})
+        else:
+            font = {}
+            future = [
+                int(item.get("start"))
+                for item in spans
+                if str(item.get("start", "")).isdigit() and int(item["start"]) > position
+            ]
+            if future:
+                boundary = min(end, min(future))
+        text = latex_escape(value[position - start:boundary - start])
+        commands = furniture_span_commands(font)
+        text = decorated_span_text(font, text)
+        text = linked_span_text(text, span.get("hyperlink_target") if span else None)
+        pieces.append(rf"{{{commands} {text}}}" if commands else text)
+        position = boundary
+    return "".join(pieces), end
+
+
+def render_furniture_field(
+    value: str,
+    spans: list[dict],
+    span_text: str,
+    cursor: int,
+) -> tuple[str, int]:
+    """Format a dynamic page field with the source run active at its position."""
+    span = furniture_span_at(spans, cursor)
+    font = (span.get("effective_format") or {}).get("font", {}) if span else {}
+    commands = furniture_span_commands(font)
+    if cursor < len(span_text) and span_text[cursor].isdigit():
+        cursor += 1
+    value = decorated_span_text(font, value)
+    return (rf"{{{commands} {value}}}" if commands else value), cursor
+
+
+def render_source_text_spans(value: str, spans: list[dict], span_text: str | None = None) -> str:
+    """Render visible Word text with its local run formats for an editable fixture."""
+    if not value:
+        return ""
+    rendered, _ = render_furniture_text(value, spans, span_text or value, 0)
+    return rendered
+
+
+def text_box_latex_paragraphs(box: dict) -> list[str]:
+    """Render Word text-box paragraph spans without asserting placement."""
+    records = box.get("paragraphs", []) if isinstance(box, dict) else []
+    rendered = []
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            text = str(record.get("format_span_text") or record.get("text") or "").strip()
+            spans = record.get("format_spans", [])
+            if text:
+                rendered.append(render_source_text_spans(text, spans if isinstance(spans, list) else [], text))
+    if rendered:
+        return rendered
+    text = str(box.get("text") or "") if isinstance(box, dict) else ""
+    return [latex_escape(paragraph.strip()) for paragraph in text.splitlines() if paragraph.strip()] or [""]
+
+
+def table_header_fixture_cells(spec: dict, count: int) -> list[str]:
+    """Use source header labels when their per-cell span evidence is safe to replay."""
+    layout = get_nested(spec, "tables.layout_evidence", {})
+    samples = layout.get("header_cell_samples", []) if isinstance(layout, dict) else []
+    if not isinstance(samples, list) or len(samples) < count:
+        return [f"Column {chr(65 + index)}" for index in range(count)]
+    cells = []
+    for sample in samples[:count]:
+        if not isinstance(sample, dict):
+            return [f"Column {chr(65 + index)}" for index in range(count)]
+        text = str(sample.get("format_span_text") or "").strip()
+        spans = sample.get("format_spans", [])
+        if not text or len(text) > 160 or "\n" in text or not isinstance(spans, list):
+            return [f"Column {chr(65 + index)}" for index in range(count)]
+        cells.append(render_source_text_spans(text, spans, text))
+    return cells
+
+
+def source_table_fixture(spec: dict, count: int, colspec: str) -> str | None:
+    """Replay a bounded Word table sample when its cell evidence is unambiguous."""
+    layout = get_nested(spec, "tables.layout_evidence", {})
+    samples = layout.get("cell_format_samples", []) if isinstance(layout, dict) else []
+    if (
+        not isinstance(samples, list)
+        or not samples
+        or layout.get("cell_format_samples_truncated")
+    ):
+        return None
+    rows: dict[int, list[dict]] = {}
+    for sample in samples:
+        if not isinstance(sample, dict):
+            return None
+        try:
+            row_index = int(sample.get("row_index"))
+            column_index = int(sample.get("column_index"))
+            grid_span = int(sample.get("grid_span") or 1)
+        except (TypeError, ValueError):
+            return None
+        paragraphs = sample.get("paragraphs", [])
+        if (
+            row_index < 1
+            or column_index < 1
+            or not 1 <= grid_span <= count
+            or not isinstance(paragraphs, list)
+            or not 1 <= len(paragraphs) <= 4
+            or sample.get("paragraphs_truncated")
+        ):
+            return None
+        vertical_merge = str(sample.get("vertical_merge") or "").lower() or None
+        if vertical_merge == "continue":
+            if any(str(paragraph.get("format_span_text") or "").strip() for paragraph in paragraphs if isinstance(paragraph, dict)):
+                return None
+            rows.setdefault(row_index, []).append({
+                "column_index": column_index,
+                "grid_span": grid_span,
+                "text": "",
+                "alignment": "left",
+                "vertical_merge": vertical_merge,
+            })
+            continue
+        rendered_paragraphs = []
+        alignments = []
+        for paragraph in paragraphs:
+            if not isinstance(paragraph, dict):
+                return None
+            text = str(paragraph.get("format_span_text") or "").strip()
+            spans = paragraph.get("format_spans", [])
+            if len(text) > 160 or "\n" in text or not isinstance(spans, list):
+                return None
+            rendered_paragraphs.append(render_source_text_spans(text, spans, text))
+            alignments.append(get_nested(paragraph, "effective_format.paragraph.alignment", "left"))
+        rendered_text = rendered_paragraphs[0] if len(rendered_paragraphs) == 1 else r"\shortstack[l]{" + r" \\ ".join(rendered_paragraphs) + "}"
+        rows.setdefault(row_index, []).append({
+            "column_index": column_index,
+            "grid_span": grid_span,
+            "text": rendered_text,
+            "alignment": alignments[0] if alignments else "left",
+            "vertical_merge": vertical_merge,
+        })
+    ordered = [rows[index] for index in sorted(rows)]
+    if not 2 <= len(ordered) <= 20:
+        return None
+    for row in ordered:
+        row.sort(key=lambda item: item["column_index"])
+        if sum(item["grid_span"] for item in row) != count:
+            return None
+        logical_column = 1
+        for item in row:
+            item["logical_column"] = logical_column
+            logical_column += item["grid_span"]
+    by_position = {
+        (row_index + 1, item["logical_column"]): item
+        for row_index, row in enumerate(ordered)
+        for item in row
+    }
+    for row_index, row in enumerate(ordered, 1):
+        for item in row:
+            merge = item["vertical_merge"]
+            if merge == "continue":
+                if item["text"]:
+                    return None
+                continue
+            if merge not in {None, "restart"}:
+                return None
+            if merge == "restart":
+                span = 1
+                next_row = row_index + 1
+                while True:
+                    continuation = by_position.get((next_row, item["logical_column"]))
+                    if (
+                        continuation is None
+                        or continuation["vertical_merge"] != "continue"
+                        or continuation["grid_span"] != item["grid_span"]
+                    ):
+                        break
+                    span += 1
+                    next_row += 1
+                if span < 2:
+                    return None
+                item["vertical_span"] = span
+            else:
+                item["vertical_span"] = 1
+    border_mode = table_border_mode(spec)
+
+    def merged_alignment(item: dict) -> str:
+        alignment = {"center": "c", "right": "r"}.get(str(item.get("alignment") or "").lower(), "l")
+        return f"|{alignment}|" if border_mode in {"grid", "vertical"} else alignment
+
+    def render_row(row: list[dict], is_header: bool) -> str:
+        cells = []
+        for item in row:
+            if item["vertical_merge"] == "continue":
+                cells.append("")
+                continue
+            text = rf"\journaltableheadercell{{{item['text']}}}" if is_header else item["text"]
+            if item.get("vertical_span", 1) > 1:
+                text = rf"\multirow{{{item['vertical_span']}}}{{*}}{{{text}}}"
+            if item["grid_span"] > 1:
+                text = rf"\multicolumn{{{item['grid_span']}}}{{{merged_alignment(item)}}}{{{text}}}"
+            cells.append(text)
+        return " & ".join(cells) + r" \\"
+
+    def rule_after(row_index: int) -> str:
+        """Avoid drawing an inner grid rule through a Word vertical merge."""
+        if row_index >= len(ordered) - 1:
+            return r"\hline"
+        continued_columns = set()
+        for item in ordered[row_index + 1]:
+            if item["vertical_merge"] == "continue":
+                continued_columns.update(range(item["logical_column"], item["logical_column"] + item["grid_span"]))
+        if not continued_columns:
+            return r"\hline"
+        ranges = []
+        start = None
+        for column in range(1, count + 1):
+            if column not in continued_columns and start is None:
+                start = column
+            if start is not None and (column in continued_columns or column == count):
+                end = column - 1 if column in continued_columns else column
+                ranges.append((start, end))
+                start = None
+        return "".join(rf"\cline{{{start}-{end}}}" for start, end in ranges)
+
+    lines = [rf"\begin{{tabular}}{{{colspec}}}", "% temp2tex-source-table-spans: replayed from Word cell evidence"]
+    if border_mode in {"grid", "horizontal"}:
+        lines.append(r"\hline")
+    elif border_mode == "unknown":
+        lines.append(r"\toprule")
+    for row_index, row in enumerate(ordered):
+        if row_index == 0:
+            lines.append(r"\journaltableheaderrow")
+        lines.append(render_row(row, row_index == 0))
+        if border_mode == "grid":
+            lines.append(rule_after(row_index))
+        elif border_mode == "horizontal" and row_index == 0:
+            lines.append(r"\hline")
+        elif border_mode == "unknown" and row_index == 0:
+            lines.append(r"\midrule")
+    if border_mode == "horizontal":
+        lines.append(r"\hline")
+    elif border_mode == "unknown":
+        lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    return "\n".join(lines)
+
+
 def header_footer_slots(
     spec: dict,
     preferred_variant: str = "default",
@@ -1666,24 +2109,36 @@ def header_footer_slots(
                 rendered_tokens: list[str] = []
                 first_page_token_index: int | None = None
                 has_tab = False
+                spans = [item for item in paragraph.get("format_spans", []) if isinstance(item, dict)]
+                span_text = str(paragraph.get("format_span_text") or "")
+                span_cursor = 0
                 for token in paragraph.get("tokens", []):
                     if token.get("kind") == "tab":
                         has_tab = True
                         segments.append("")
+                        tab_at = span_text.find("\t", span_cursor)
+                        if tab_at >= 0:
+                            span_cursor = tab_at + 1
                     elif token.get("kind") == "page_field":
-                        value = r"\thepage"
+                        value, span_cursor = render_furniture_field(
+                            r"\thepage", spans, span_text, span_cursor,
+                        )
                         if first_page_token_index is None:
                             first_page_token_index = len(rendered_tokens)
                         rendered_tokens.append(value)
                         segments[-1] += value
                     elif token.get("kind") == "page_count_field":
-                        value = r"\pageref{LastPage}"
+                        value, span_cursor = render_furniture_field(
+                            r"\pageref{LastPage}", spans, span_text, span_cursor,
+                        )
                         if first_page_token_index is None:
                             first_page_token_index = len(rendered_tokens)
                         rendered_tokens.append(value)
                         segments[-1] += value
                     elif token.get("kind") == "text":
-                        value = latex_escape(str(token.get("value", "")))
+                        value, span_cursor = render_furniture_text(
+                            str(token.get("value", "")), spans, span_text, span_cursor,
+                        )
                         rendered_tokens.append(value)
                         segments[-1] += value
                 # Some Word producers encode the visual right tab stop only in
@@ -1715,7 +2170,13 @@ def header_footer_slots(
                     len(set(peer_values)) >= 2 and all(re.fullmatch(r"\d+", peer) for peer in peer_values)
                 ) or len(numeric_samples) >= 2:
                     segments[index] = r"\thepage"
-            direct = paragraph.get("direct_format", {}) if isinstance(paragraph.get("direct_format"), dict) else {}
+            # Run spans preserve mixed bold, italic, colour, and size inside
+            # one header/footer paragraph. Only use the legacy whole-paragraph
+            # formatter when no span ledger is available.
+            if paragraph.get("format_spans"):
+                direct = {}
+            else:
+                direct = paragraph.get("direct_format", {}) if isinstance(paragraph.get("direct_format"), dict) else {}
             font = direct.get("font", {}) if isinstance(direct.get("font"), dict) else {}
             try:
                 size = int(font.get("size_half_points")) / 2
@@ -1891,18 +2352,16 @@ def text_box_candidate_file(spec: dict) -> str:
                 width, x, y = positioned
                 lines.append("% Page/margin-relative executable candidate (keep commented until PDF confirmation):")
                 lines.append(f"% \\begin{{journalpositionedtextbox}}{{{width}}}{{{x}}}{{{y}}}")
-                for paragraph in text.splitlines() or [""]:
-                    escaped = latex_escape(paragraph.strip())
-                    lines.append(f"% {escaped}" if escaped else "%")
+                for paragraph in text_box_latex_paragraphs(box):
+                    lines.append((f"% {paragraph}" + r"\par") if paragraph else "%")
                 lines.append("% \\end{journalpositionedtextbox}")
             else:
                 lines.append("% No executable coordinate candidate: the source origin is flow-relative or incomplete.")
         if box.get("requires_visual_review"):
             lines.append("% Placement remains pending visual confirmation.")
         lines.append("% \\begin{journaltextbox}")
-        for paragraph in text.splitlines() or [""]:
-            escaped = latex_escape(paragraph.strip())
-            lines.append(f"% {escaped}" if escaped else "%")
+        for paragraph in text_box_latex_paragraphs(box):
+            lines.append((f"% {paragraph}" + r"\par") if paragraph else "%")
         lines.append("% \\end{journaltextbox}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -1929,8 +2388,8 @@ def text_box_active_file(spec: dict) -> str:
         width, x, y = positioned
         lines.append(f"% Text box {index}; source: {box.get('part') or 'unknown source'}")
         lines.append(f"\\begin{{journalpositionedtextbox}}{{{width}}}{{{x}}}{{{y}}}")
-        for paragraph in str(box.get("text") or "").splitlines() or [""]:
-            lines.append(latex_escape(paragraph.strip()))
+        for paragraph in text_box_latex_paragraphs(box):
+            lines.append(paragraph + r"\par")
         lines.append("\\end{journalpositionedtextbox}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -2029,7 +2488,11 @@ def representative_table_fixture(spec: dict) -> str:
     widths = layout.get("grid_column_widths_twips", []) if isinstance(layout, dict) else []
     count = len(widths) if isinstance(widths, list) and 2 <= len(widths) <= 8 else 3
     colspec = representative_table_colspec(spec)
-    headers = " & ".join(rf"\journaltableheadercell{{Column {chr(65 + index)}}}" for index in range(count)) + r" \\"
+    replayed_source = source_table_fixture(spec, count, colspec)
+    if replayed_source:
+        return replayed_source
+    header_cells = table_header_fixture_cells(spec, count)
+    headers = " & ".join(rf"\journaltableheadercell{{{value}}}" for value in header_cells) + r" \\"
     values = " & ".join(f"Item {index + 1}" for index in range(count)) + r" \\"
     tail = " & ".join("Value" for _ in range(max(0, count - 2)))
     merged = rf"\multicolumn{{2}}{{l}}{{Merged cells}}" + (f" & {tail}" if tail else "") + r" \\"
@@ -2129,10 +2592,79 @@ def captioned_float_fixture(
     return f"\\begin{{{environment}}}\n{body}\n\\end{{{environment}}}"
 
 
-def default_body_block(sample_citation: str, spec: dict, asset_manifest: Path | None = None) -> str:
-    """Return a compileable fixture that exercises every core class interface."""
+def default_body_block(
+    sample_citation: str,
+    spec: dict,
+    asset_manifest: Path | None = None,
+    *,
+    include_source_body_assets: bool = False,
+) -> str:
+    """Return a compileable fixture that exercises every core class interface.
+
+    Word body artwork normally belongs to the sample manuscript, not the
+    reusable journal template. Keep extracted files in ``assets/`` as evidence,
+    but use a neutral placeholder in ``main.tex`` unless a caller explicitly
+    requests content conversion rather than template reconstruction.
+    """
+    language = str(get_nested(spec, "journal.language", "en") or "en").lower()
+    is_cjk = language in {"zh", "mixed"}
+    labels = {
+        "table_note": "\u793a\u4f8b\u8868\u6ce8\u3002",
+        "table_caption": "\u5e26\u8868\u6ce8\u7684\u793a\u4f8b\u8868",
+        "figure_caption": "\u793a\u4f8b\u56fe\u7247\u5360\u4f4d\u7b26",
+        "list_section": "\u5217\u8868\u9a8c\u8bc1",
+        "list_item": "\u8bf7\u66ff\u6362\u4e3a\u53ef\u7f16\u8f91\u7684\u5217\u8868\u9879\u3002",
+        "nested_item": "\u5d4c\u5957\u5217\u8868\u9879\u3002",
+        "list_check": "\u8bf7\u4e0e\u539f\u6a21\u677f\u5bf9\u7167\u5217\u8868\u7f29\u8fdb\u3002",
+        "endnote": "\u793a\u4f8b\u5c3e\u6ce8\u3002",
+        "section": "\u6a21\u677f\u9a8c\u8bc1\u6837\u7a3f",
+        "intro": "\u6b64\u53ef\u7f16\u8f91\u6837\u7a3f\u7528\u4e8e\u68c0\u67e5\u6b63\u6587\u3001\u7f29\u8fdb\u3001\u5f15\u6587\u548c\u4ea4\u53c9\u5f15\u7528\u3002\u5176\u4e2d\u5305\u542b\u4e00\u4e2a\u811a\u6ce8",
+        "footnote": "\u793a\u4f8b\u811a\u6ce8\u3002",
+        "second": "\u4e8c\u7ea7\u6807\u9898",
+        "second_check": "\u68c0\u67e5\u4e8c\u7ea7\u6807\u9898\u7684\u95f4\u8ddd\u3002",
+        "third": "\u4e09\u7ea7\u6807\u9898",
+        "third_check": "\u68c0\u67e5\u4e09\u7ea7\u6807\u9898\u7684\u683c\u5f0f\u3002",
+        "fourth": "\u56db\u7ea7\u6807\u9898",
+        "fifth": "\u4e94\u7ea7\u6807\u9898",
+        "run_in": "\u884c\u5185\u6587\u5b57\u3002",
+        "math_section": "\u516c\u5f0f\u3001\u8868\u683c\u4e0e\u56fe\u7247",
+        "results": "\u7ed3\u679c",
+        "results_text": None,
+    } if is_cjk else {
+        "table_note": "Example table note.",
+        "table_caption": "Example table with notes",
+        "figure_caption": "Example figure placeholder",
+        "list_section": "List Verification",
+        "list_item": "Replace with an editable list item.",
+        "nested_item": "Nested list item.",
+        "list_check": "Verify list indentation against the source.",
+        "endnote": "Example endnote.",
+        "section": "Template Verification Fixture",
+        "intro": "This editable fixture checks body text, indentation, citations, and cross-references. It includes a footnote",
+        "footnote": "Example footnote.",
+        "second": "Second-Level Heading",
+        "second_check": "Check the second-level heading spacing.",
+        "third": "Third-Level Heading",
+        "third_check": "Check the third-level heading.",
+        "fourth": "Fourth",
+        "fifth": "Fifth",
+        "run_in": "Run-in.",
+        "math_section": "Equation, Table, and Figure",
+        "results": "Results",
+        "results_text": None,
+    }
+    if is_cjk:
+        labels["results_text"] = (
+            f"\u53c2\u89c1\u8868~\\ref{{tab:example}}\u3001\u56fe~\\ref{{fig:example}}"
+            f"\u4e0e\u516c\u5f0f~\\ref{{eq:sample}}\uff1b\u5f15\u7528 {sample_citation}\u3002"
+        )
+    else:
+        labels["results_text"] = (
+            f"See Table~\\ref{{tab:example}}, Figure~\\ref{{fig:example}}, "
+            f"and Equation~\\ref{{eq:sample}}; cite {sample_citation}."
+        )
     table_fixture = representative_table_fixture(spec)
-    body_assets = body_asset_paths(asset_manifest)
+    body_assets = body_asset_paths(asset_manifest) if include_source_body_assets else []
     if body_assets:
         figure_source = rf"\includegraphics[width=\journalfigurerepresentativewidth,height=\journalfigurerepresentativeheight,keepaspectratio]{{assets/{latex_escape(body_assets[0])}}}"
     else:
@@ -2141,14 +2673,14 @@ def default_body_block(sample_citation: str, spec: dict, asset_manifest: Path | 
 {table_fixture}
 \begin{{tablenotes}}
 \small
-\item Example table note.
+\item {labels["table_note"]}
 \end{{tablenotes}}
 \end{{threeparttable}}"""
     table_float = captioned_float_fixture(
-        spec, "table", table_content, "Example table with notes", "tab:example"
+        spec, "table", table_content, labels["table_caption"], "tab:example"
     )
     figure_float = captioned_float_fixture(
-        spec, "figure", figure_source, "Example figure placeholder", "fig:example"
+        spec, "figure", figure_source, labels["figure_caption"], "fig:example"
     )
     list_evidence = get_nested(spec, "body.lists", {})
     list_fixture = ""
@@ -2157,36 +2689,36 @@ def default_body_block(sample_citation: str, spec: dict, asset_manifest: Path | 
         nested = ""
         levels = list_evidence.get("levels_seen", [])
         if isinstance(levels, list) and len(levels) > 1:
-            nested = "\n\\begin{journalitemize}\n\\item Nested list item.\n\\end{journalitemize}"
+            nested = f"\n\\begin{{journalitemize}}\n\\item {labels['nested_item']}\n\\end{{journalitemize}}"
         list_fixture = rf"""
-\section{{List Verification}}
+\section{{{labels["list_section"]}}}
 \begin{{{environment}}}
-\item Replace with an editable list item.{nested}
-\item Verify list indentation against the source.
+\item {labels["list_item"]}{nested}
+\item {labels["list_check"]}
 \end{{{environment}}}
 """
     endnote_fixture = ""
     if get_nested(spec, "endnotes.enabled", False):
         endnote_fixture = (
-            "\nThis source contains endnote evidence.\\journalendnote{Example endnote.}\n"
+            f"\n\\journalendnote{{{labels['endnote']}}}\n"
             "\\printjournalendnotes\n"
         )
-    return rf"""\section{{Template Verification Fixture}}
-This editable fixture checks body text, indentation, citations, and cross-references. It includes a footnote\footnote{{Example footnote.}}.
+    return rf"""\section{{{labels["section"]}}}
+{labels["intro"]}\footnote{{{labels["footnote"]}}}.
 
-\subsection{{Second-Level Heading}}
-Check the second-level heading spacing.
+\subsection{{{labels["second"]}}}
+{labels["second_check"]}
 
-\subsubsection{{Third-Level Heading}}
-Check the third-level heading.
+\subsubsection{{{labels["third"]}}}
+{labels["third_check"]}
 
-\paragraph{{Fourth}}
-Run-in.
+\paragraph{{{labels["fourth"]}}}
+{labels["run_in"]}
 
-\subparagraph{{Fifth}}
-Run-in.
+\subparagraph{{{labels["fifth"]}}}
+{labels["run_in"]}
 
-\section{{Equation, Table, and Figure}}
+\section{{{labels["math_section"]}}}
 
 \begin{{journalequation}}
 E = mc^2
@@ -2197,8 +2729,8 @@ E = mc^2
 
 {figure_float}
 
-\section{{Results}}
-See Table~\ref{{tab:example}}, Figure~\ref{{fig:example}}, and Equation~\ref{{eq:sample}}; cite {sample_citation}.
+\section{{{labels["results"]}}}
+{labels["results_text"]}
 {list_fixture}
 {endnote_fixture}
 """
@@ -2274,6 +2806,7 @@ def main() -> int:
     parser.add_argument("--outdir", default="latex-package")
     parser.add_argument("--word-source", help="Optional DOC/DOCX/DOCM/DOT/DOTX/DOTM/RTF source from which to copy embedded assets")
     parser.add_argument("--source-inventory", help="Optional source_inventory.json to copy into the generated package; a sibling file is auto-discovered")
+    parser.add_argument("--format-ledger", help="Optional word_format_ledger.json to copy into the generated package")
     parser.add_argument("--promotion-report", help="Accepted promotion_report.json for a render_verified page/body/placement/float-spacing/backmatter/appendix boundary calibration")
     parser.add_argument("--apply-source-header-assets", action="store_true", help="Apply Word XML header/footer asset candidates after render confirmation")
     parser.add_argument("--apply-first-page-furniture", action="store_true", help="Apply a render-confirmed Word first-page header/footer candidate")
@@ -2291,11 +2824,26 @@ def main() -> int:
     (outdir / "figures").mkdir(exist_ok=True)
     (outdir / "assets").mkdir(exist_ok=True)
     inventory_candidate = Path(args.source_inventory).expanduser().resolve() if args.source_inventory else spec_path.parent / "source_inventory.json"
+    format_ledger_path = None
+    format_ledger_data = None
     if args.source_inventory and not inventory_candidate.is_file():
         raise SystemExit(f"--source-inventory does not exist: {inventory_candidate}")
     if inventory_candidate.is_file():
         inventory_path = inventory_candidate
         (outdir / "source_inventory.json").write_bytes(inventory_path.read_bytes())
+    if args.format_ledger:
+        ledger_path = Path(args.format_ledger).expanduser().resolve()
+        if not ledger_path.is_file():
+            raise SystemExit(f"--format-ledger does not exist: {ledger_path}")
+        try:
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"--format-ledger is not valid JSON: {exc}") from exc
+        if ledger.get("schema_version") != "temp2tex.word-format-ledger.v1":
+            raise SystemExit("--format-ledger has an unsupported schema_version")
+        (outdir / "word_format_ledger.json").write_bytes(ledger_path.read_bytes())
+        format_ledger_path = ledger_path
+        format_ledger_data = ledger
 
     language = get_nested(spec, "journal.language", "en")
     title = get_nested(spec, "journal.name", "Journal Template")
@@ -2446,23 +2994,43 @@ def main() -> int:
         toc = (f"\\setcounter{{tocdepth}}{{{toc_depth}}}\n" if toc_depth is not None else "") + "\\tableofcontents\n\\newpage"
     else:
         toc = "% Add \\tableofcontents only if the journal requires it."
-    appendix_title = "Appendix Title" if get_nested(spec, "appendices.enabled", True) else "Optional Appendix Verification"
-    appendix_intro = (
-        "Appendix figures, tables, and equations should follow the journal numbering policy."
-        if get_nested(spec, "appendices.enabled", True)
-        else "This editable default exercises appendix counters because the official source did not provide appendix evidence."
+    is_cjk_default = language in {"zh", "mixed"}
+    if is_cjk_default:
+        appendix_title = "\u9644\u5f55\u6807\u9898" if get_nested(spec, "appendices.enabled", True) else "\u9644\u5f55\u9a8c\u8bc1\u6837\u7a3f"
+        appendix_intro = (
+            "\u9644\u5f55\u56fe\u3001\u8868\u4e0e\u516c\u5f0f\u5e94\u9075\u5faa\u671f\u520a\u7684\u7f16\u53f7\u89c4\u5219\u3002"
+            if get_nested(spec, "appendices.enabled", True)
+            else "\u5b98\u65b9\u6e90\u6587\u4ef6\u672a\u63d0\u4f9b\u9644\u5f55\u8bc1\u636e\uff0c\u6b64\u53ef\u7f16\u8f91\u6837\u7a3f\u7528\u4e8e\u9a8c\u8bc1\u9644\u5f55\u8ba1\u6570\u5668\u3002"
+        )
+        appendix_headers = ("\u9879\u76ee", "\u503c")
+        appendix_row = ("\u9644\u5f55\u8bc1\u636e", "\u53ef\u7f16\u8f91")
+        appendix_table_caption = "\u9644\u5f55\u8868\u683c\u9a8c\u8bc1"
+        appendix_figure_caption = "\u9644\u5f55\u56fe\u7247\u9a8c\u8bc1"
+    else:
+        appendix_title = "Appendix Title" if get_nested(spec, "appendices.enabled", True) else "Optional Appendix Verification"
+        appendix_intro = (
+            "Appendix figures, tables, and equations should follow the journal numbering policy."
+            if get_nested(spec, "appendices.enabled", True)
+            else "This editable default exercises appendix counters because the official source did not provide appendix evidence."
+        )
+        appendix_headers = ("Item", "Value")
+        appendix_row = ("Appendix evidence", "Editable")
+        appendix_table_caption = "Appendix table verification"
+        appendix_figure_caption = "Appendix figure verification"
+    appendix_table_content = (
+        r"\begin{tabular}{ll}" "\n"
+        r"\toprule" "\n"
+        f"{appendix_headers[0]} & {appendix_headers[1]} \\\\" "\n"
+        r"\midrule" "\n"
+        f"{appendix_row[0]} & {appendix_row[1]} \\\\" "\n"
+        r"\bottomrule" "\n"
+        r"\end{tabular}"
     )
     appendix_table = captioned_float_fixture(
         spec,
         "table",
-        r"""\begin{tabular}{ll}
-\toprule
-Item & Value \\
-\midrule
-Appendix evidence & Editable \\
-\bottomrule
-\end{tabular}""",
-        "Appendix table verification",
+        appendix_table_content,
+        appendix_table_caption,
         "tab:appendix-sample",
         use_representative_span=False,
     )
@@ -2470,7 +3038,7 @@ Appendix evidence & Editable \\
         spec,
         "figure",
         r"\fbox{\rule{0pt}{12mm}\rule{0.45\linewidth}{0pt}}",
-        "Appendix figure verification",
+        appendix_figure_caption,
         "fig:appendix-sample",
         use_representative_span=False,
     )
@@ -2505,6 +3073,16 @@ a + b = c
     source_title_alignment = source_role_alignment(spec, "front_matter.title_style")
     source_author_alignment = source_role_alignment(spec, "front_matter.author_style")
     source_affiliation_alignment = source_role_alignment(spec, "front_matter.affiliation_style")
+    source_english_title_format = source_role_format(spec, "front_matter.english_title_style", source_title_format)
+    source_english_author_format = source_role_format(spec, "front_matter.english_author_style", source_author_format)
+    source_english_affiliation_format = source_role_format(spec, "front_matter.english_affiliation_style", source_affiliation_format)
+    source_english_abstract_format = source_role_format(spec, "front_matter.english_abstract_style", r"\normalfont")
+    source_english_keywords_format = source_role_format(spec, "front_matter.english_keywords_style", r"\normalfont")
+    source_english_title_alignment = source_role_alignment(spec, "front_matter.english_title_style", source_title_alignment)
+    source_english_author_alignment = source_role_alignment(spec, "front_matter.english_author_style", source_author_alignment)
+    source_english_affiliation_alignment = source_role_alignment(spec, "front_matter.english_affiliation_style", source_affiliation_alignment)
+    source_english_abstract_alignment = source_role_alignment(spec, "front_matter.english_abstract_style", r"\raggedright")
+    source_english_keywords_alignment = source_role_alignment(spec, "front_matter.english_keywords_style", r"\raggedright")
     abstract_environment_block = abstract_environment(spec)
     (
         keywords_format,
@@ -2543,12 +3121,15 @@ a + b = c
         journal_column_ratio_left,
         journal_column_ratio_right,
     ) = unequal_column_setup(spec)
+    heading_keep_levels = heading_keep_with_next_levels(spec)
+    heading_keep_setup = heading_keep_with_next_setup(spec)
     cls = (
         CLASS_TEMPLATE
         .replace("__DATE__", "2026/07/08")
         .replace("__BASE_OPTIONS__", class_base["base_options"])
         .replace("__BASE_CLASS__", class_base["base_class"])
         .replace("__FONT_SETUP__", font_setup)
+        .replace("__HEADING_PAGINATION_PACKAGE__", "\n" + r"\RequirePackage{needspace}" if heading_keep_setup else "")
         .replace("__CITATION_SETUP__", "\n" + citation_setup)
         .replace("__FOOTNOTE_SETUP__", "\n" + source_footnote_setup)
         .replace("__ENDNOTE_SETUP__", "\n" + source_endnote_setup)
@@ -2615,6 +3196,7 @@ a + b = c
         .replace("__BIBLIOGRAPHY_SETUP__", reference_setup)
         .replace("__PAGE_STYLE_BLOCK__", page_style_block(spec))
         .replace("__SECTION_NUMBERING_SETUP__", section_numbering_setup(spec))
+        .replace("__HEADING_KEEP_WITH_NEXT_SETUP__", heading_keep_setup)
         .replace("__SECTION_FORMAT__", headings["section"])
         .replace("__SUBSECTION_FORMAT__", headings["subsection"])
         .replace("__SUBSUBSECTION_FORMAT__", headings["subsubsection"])
@@ -2642,13 +3224,23 @@ a + b = c
         .replace("__TITLE_TOP_SKIP__", class_length(spec, "front_matter.title_top_skip", source_role_before_skip(spec, "front_matter.title_style", "0pt")))
         .replace("__TITLE_ALIGNMENT__", source_title_alignment)
         .replace("__TITLE_FORMAT__", source_title_format)
+        .replace("__ENGLISH_TITLE_ALIGNMENT__", source_english_title_alignment)
+        .replace("__ENGLISH_TITLE_FORMAT__", source_english_title_format)
         .replace("__TITLE_AFTER_SKIP__", class_length(spec, "front_matter.title_after_skip", front_matter_boundary_skip(spec, "title_to_author", source_role_transition_skip(spec, "front_matter.title_style", "front_matter.author_style", "8pt"))))
         .replace("__AUTHOR_FORMAT__", source_author_format)
         .replace("__AUTHOR_ALIGNMENT__", source_author_alignment)
+        .replace("__ENGLISH_AUTHOR_FORMAT__", source_english_author_format)
+        .replace("__ENGLISH_AUTHOR_ALIGNMENT__", source_english_author_alignment)
         .replace("__AUTHOR_RENDER__", author_rendering(spec))
         .replace("__AUTHOR_AFTER_SKIP__", class_length(spec, "front_matter.author_after_skip", front_matter_boundary_skip(spec, "author_to_affiliation", source_role_transition_skip(spec, "front_matter.author_style", "front_matter.affiliation_style", "6pt"))))
         .replace("__AFFILIATION_FORMAT__", source_affiliation_format)
         .replace("__AFFILIATION_ALIGNMENT__", source_affiliation_alignment)
+        .replace("__ENGLISH_AFFILIATION_FORMAT__", source_english_affiliation_format)
+        .replace("__ENGLISH_AFFILIATION_ALIGNMENT__", source_english_affiliation_alignment)
+        .replace("__ENGLISH_ABSTRACT_FORMAT__", source_english_abstract_format)
+        .replace("__ENGLISH_ABSTRACT_ALIGNMENT__", source_english_abstract_alignment)
+        .replace("__ENGLISH_KEYWORDS_FORMAT__", source_english_keywords_format)
+        .replace("__ENGLISH_KEYWORDS_ALIGNMENT__", source_english_keywords_alignment)
         # The affiliation-to-abstract boundary is emitted once after
         # \maketitle. Keeping an additional affiliation skip would duplicate
         # Word paragraph spacing at the same semantic boundary.
@@ -2715,6 +3307,9 @@ a + b = c
         "}\n",
         encoding="utf-8",
     )
+    equation_candidates = get_nested(spec, "equations.latex_candidates", [])
+    if isinstance(equation_candidates, list) and equation_candidates:
+        (outdir / "equations.tex").write_text(equation_candidate_file(spec), encoding="utf-8")
     if str(get_nested(spec, "front_matter.cover_mode", "")).startswith("candidate"):
         cover_title = title
         (outdir / "cover.tex").write_text(
@@ -2836,22 +3431,41 @@ a + b = c
             "## document.cjk_font_family",
             f"- Official evidence checked: Word East Asian body font `{cjk_font}`.",
             "- Missing or ambiguous requirement: local XeLaTeX font availability and rendered equivalence have not been verified.",
-            "- Fallback used: retained the CTeX CJK fallback chain instead of applying an unverified font name.",
+            "- Fallback used: apply the source font only when XeLaTeX can find it; otherwise retain the CTeX CJK fallback chain.",
             "- LaTeX location: journal-template.cls",
             "",
         ])
     body_paragraph_format = role_effective_format(spec, "page.source_body_style").get("paragraph", {})
     body_line_spacing = body_paragraph_format.get("line_spacing")
     body_line_rule = str(body_paragraph_format.get("line_spacing_rule") or "").lower()
-    if body_line_spacing is None or body_line_rule == "exact":
+    body_baseline = source_body_baseline_pt(spec)
+    body_comment_evidence = get_nested(spec, "page.source_body_style.comment_format_evidence", {})
+    if body_line_rule == "exact" and body_baseline is not None:
+        evidence_label = "anchored official Word formatting comment plus selected body evidence" if isinstance(body_comment_evidence, dict) and body_comment_evidence else "Word body style and paragraph-level direct formatting"
+        gap_lines.extend([
+            "## page.line_spacing",
+            f"- Official evidence checked: {evidence_label}.",
+            f"- Implemented: fixed source baseline `{body_baseline:g}pt` using an explicit LaTeX body font baseline.",
+            "- Remaining verification: confirm rendered body density and glyph metrics against the source PDF; do not replace this physical baseline with a generic line-spread multiplier.",
+            "- LaTeX location: journal-template.cls",
+            "",
+        ])
+    elif body_line_spacing is None:
         gap_lines.extend([
             "## page.line_spacing",
             "- Official evidence checked: Word body style and paragraph-level direct formatting.",
-            "- Missing or ambiguous requirement: " + (
-                "Word fixed line spacing needs renderer calibration before it can be mapped to a LaTeX line-spread multiplier."
-                if body_line_rule == "exact" else "no direct Word line-spacing metric was available for the selected body role."
-            ),
+            "- Missing or ambiguous requirement: no direct Word line-spacing metric was available for the selected body role.",
             f"- Fallback used: generated line spacing `{get_nested(spec, 'page.line_spacing', 1.15)}`; verify body density against a rendered reference.",
+            "- LaTeX location: journal-template.cls",
+            "",
+        ])
+    if heading_keep_levels:
+        role_names = ", ".join(command for _, command in heading_keep_levels)
+        gap_lines.extend([
+            "## body.heading_keep_with_next",
+            "- Official evidence checked: Word heading paragraph/style `keepNext` values.",
+            f"- Implemented: `{role_names}` reserve two baseline lines before the heading so it stays with following text.",
+            "- Remaining gap: exact Word pagination depends on the manuscript and must be checked with a same-content PDF comparison.",
             "- LaTeX location: journal-template.cls",
             "",
         ])
@@ -2971,9 +3585,7 @@ a + b = c
             "",
         ])
     body_evidence = get_nested(spec, "page.source_body_style", {})
-    if isinstance(body_evidence, dict) and body_evidence.get("visible_flow_override_candidate") and str(
-        body_evidence.get("render_mode") or ""
-    ).lower() != "visible_flow_exemplar":
+    if isinstance(body_evidence, dict) and body_evidence.get("visible_flow_override_candidate") and effective_body_style_mode(spec) != "visible_flow_exemplar":
         gap_lines.extend([
             "## page.source_body_style.visible_flow_override_candidate",
             "- Official evidence checked: multiple long ordinary-flow Word paragraphs with stable effective formatting.",
@@ -3139,6 +3751,29 @@ a + b = c
             "No fallbacks recorded yet. Add entries for every inferred non-official rule.",
             "",
         ])
+    coverage_report = None
+    if inventory_candidate.is_file():
+        coverage_report = build_coverage(
+            json.loads(inventory_candidate.read_text(encoding="utf-8")),
+            output_spec,
+            outdir,
+            format_ledger_data,
+        )
+        (outdir / "source_feature_coverage.json").write_text(
+            json.dumps(coverage_report, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        if coverage_report["priority_gaps"]:
+            gap_lines.extend([
+                "## source_feature_coverage",
+                "- Source-visible feature audit: `source_feature_coverage.json`.",
+                "- Priority gaps must be mapped from the recorded Word evidence before PDF micro-calibration:",
+                *[
+                    f"  - `{item.get('feature') or item.get('role') or 'unclassified'}`: {item['reason']}"
+                    for item in coverage_report["priority_gaps"]
+                ],
+                "",
+            ])
     (outdir / "format_gap_log.md").write_text("\n".join(gap_lines), encoding="utf-8")
     visual_verification_text = (
         "This package contains a render-verified calibration at "
@@ -3161,6 +3796,29 @@ a + b = c
         "",
         "The class owns page geometry, front matter, headings, content boxes, captions, and page style. Edit manuscript content in `main.tex`.",
         "",
+        "## Source Feature Coverage",
+        "",
+        (
+            f"`source_feature_coverage.json` records {coverage_report['summary']['mapped']} mapped source-visible features, "
+            f"{coverage_report['summary']['needs_mapping']} feature(s) needing mapping, and "
+            f"{coverage_report['summary']['observed_run_format_spans']} preserved Word run-format span(s). "
+            f"The paragraph/run role audit records {coverage_report['summary'].get('ledger_roles_mapped', 'n/a')} source-backed mappings, "
+            f"{coverage_report['summary'].get('ledger_roles_needing_mapping', 'n/a')} missing role mapping(s), and "
+            f"{coverage_report['summary'].get('ledger_roles_pending_visual_confirmation', 'n/a')} role(s) pending visual confirmation. "
+            "Resolve priority gaps before visual micro-calibration."
+            if coverage_report
+            else "No source inventory was supplied, so source-feature coverage is pending. Inspect the official Word evidence before visual calibration."
+        ),
+        "",
+        *(
+            [
+                "## Word Format Ledger",
+                "",
+                "`word_format_ledger.json` preserves the paragraph-and-run evidence used to map title, front matter, headings, body, tables, figures, notes, references, and appendices. Review unresolved mapping entries before changing class-level formatting.",
+                "",
+            ]
+            if format_ledger_path else []
+        ),
         "## References",
         "",
         "`main.tex` uses an editable `thebibliography` fixture by default so the package compiles without a publisher-specific BibTeX backend. `references.bib` is provided as the editable database; when the official journal supplies a `.bst` or BibLaTeX backend, replace the fixture with the official bibliography commands and run the required backend before comparing PDFs.",

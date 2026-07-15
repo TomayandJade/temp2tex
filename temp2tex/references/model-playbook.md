@@ -17,6 +17,12 @@
 
 Use this playbook after Temp2TeX loads. The goal is to help an LLM agent decide what to do, what evidence is strong enough, and when to deliver a package with documented gaps.
 
+Read `agent-control-loop.md` first. This playbook supplies the decision rules
+inside that loop; it does not authorize a one-pass conversion or a benchmark
+run in place of per-journal evidence, mapping, and audit checkpoints.
+Use `atomic-reconstruction.md` for the required paragraph/run-to-LaTeX-owner
+loop. A script-generated draft starts that loop; it never completes it.
+
 ## Task Mode
 
 Classify the task before doing work:
@@ -60,7 +66,11 @@ Extract these decisions before writing LaTeX:
   Preserve explicit running-text size, bold/italic state, and RGB colour in
   the slot formatter.
   Retain image assets by default and apply them only after PDF comparison
-  confirms their rendered position.
+  confirms their rendered position. Treat body artwork in a filled Word sample
+  as manuscript content, not reusable template furniture: keep it under
+  `assets/` with provenance, but do not inject it into the default `main.tex`
+  figure fixture. Use a neutral editable placeholder until the user supplies
+  their own article artwork.
 - Font model: family, base size, line spacing, paragraph indentation, paragraph spacing.
 - Front matter: cover/title page, running title, author order, affiliations, corresponding author, author notes, received/revised/accepted dates.
 - Abstracts and keywords: placement, labels, indentation, bold/italic rules, bilingual variants.
@@ -76,6 +86,47 @@ Extract these decisions before writing LaTeX:
 - Language: English-only, Chinese-only, or bilingual/CJK needs.
 
 When local inspection tools are unavailable, infer from the visible document text, screenshots, PDF pages, and official instructions. Mark uncertain values as inferred.
+
+## Source-Feature Coverage Gate
+
+When Word inspection is available, retain every contiguous run-format span:
+the character range, text, direct formatting, and effective formatting after
+style inheritance. Use spans to distinguish role-wide typography from local
+emphasis. For example, a bold Abstract label does not make the abstract body
+bold, and a mixed title must not be flattened into one guessed title style.
+If Word contains tracked revisions, treat insertions as current visible text
+and exclude deletions or moved-from text from role evidence and editable
+output. Keep revision counts in the source ledger; do not silently accept
+changes or reproduce deleted instructions.
+Treat a Word content-control tag, alias, lock, or placeholder as a semantic
+tie-breaker only after its visible location and surrounding role agree. Keep
+the metadata in the evidence packet, but do not let a control label alone
+invent a title, author, abstract, or required submission field. Word comments
+are guidance evidence, not visible manuscript text. Retain their author,
+anchor, and wording; reconcile them with visible source and official guidance,
+then record any adopted rule as a comment-backed inference. Adopt a formatting
+value only when the comment explicitly names the target role and value, has a
+known anchor, and does not conflict with stronger visible or official evidence;
+never emit its prose in `main.tex`.
+When the run belongs to an external Word hyperlink, retain its relationship
+target with that span. Emit an editable LaTeX link only for a well-formed
+http(s) or mailto target; internal anchors, file targets, and missing targets
+remain evidence for manual resolution.
+
+Before PDF comparison, create `source_feature_coverage.json`. Mark each
+observable feature as `mapped`, `needs_mapping`, or `not_observable`; name its
+editable owner in `journal-template.cls` or `main.tex`. Prioritize run spans,
+page frame, line numbers, page furniture, title, abstract, headings, tables,
+figures, notes, references, and appendix. Do not use margin/font/float tuning
+to mask a `needs_mapping` source feature. An unused similarly named Word style
+is a candidate, not coverage.
+
+For Word OMML equations, source-feature coverage is mapped only when every
+observed equation has a conservative converted candidate in equations.tex.
+Fractions, scripts, roots, delimiters, functions, n-ary operators, limits,
+matrices, and equation arrays may be translated when their OOXML structure is
+explicit. Group characters, borders, and unknown nodes must remain manual
+translation evidence rather than a guessed formula.
 
 ## Word Style Semantics
 
@@ -96,9 +147,15 @@ actually use it.
    publisher-specific style such as `Body Undented` authoritative unless
    stronger render evidence contradicts it.
 4. Never infer the body style from raw frequency alone. Reference entries, lists,
-   captions, tables, figure descriptions, acknowledgements, headers, and footnotes
-   often occur more often than normal prose in a template sample.
+captions, tables, figure descriptions, acknowledgements, headers, and footnotes
+often occur more often than normal prose in a template sample.
 5. Keep bibliography and body mapping distinct even when both use the same font.
+
+When the template prose explicitly says that ordinary paragraphs have no blank
+separation, preserve that sentence as a source rule and set the class body
+paragraph skip to zero. This rule outranks a generic `Normal` style after-space,
+which can exist only to make an instructional sample readable. It does not
+authorize guessing zero spacing from an otherwise compact-looking page.
 6. When a visible heading exemplar lacks an explicit Word size, inspect the
    next few official template paragraphs for role-specific instructions such
    as `Headings are 10pt`, `Subheads are 9 pt`, or `Tertiary heads are 8pt`.
@@ -139,6 +196,19 @@ and footnote styles from the heading scaffold. A bare leading letter or number
 is weak evidence: reference entries such as `J. Smith` and conversion-table
 rows such as `1 Mx` are not headings. Accept alphabetic numbering only when
 Word explicitly supplies a heading/outline role.
+
+Separate a heading's visible label from its numbering mechanism. A sample such
+as `1 Introduction` or `2.1 Template Styles` proves that the characters are
+visible in that sample; it does not by itself prove that Word applies automatic
+section counters. Enable `\thesection`-style LaTeX numbering only when at least
+one of these is present: `w:numPr` on a representative heading, a used heading
+style carrying numbering, an official author instruction, or repeated rendered
+pages that establish the counter sequence. When the prefix is literal text
+only, preserve it as editable sample text or choose and log a documented
+default; do not silently manufacture automatic counters. For a same-content
+Word/PDF comparison, inject the same chosen numbered or unnumbered fallback on
+both sides before interpreting a heading-density mismatch as a conversion
+failure.
 
 When `source_inventory.json` contains OOXML metrics, read a style's direct
 format, then its `based_on_style_id`, then `document_defaults`. A missing direct
@@ -193,6 +263,13 @@ in the class. For figures, retain body drawing dimensions and inline/anchor
 state, copy the original media into `assets/`, and expose editable figure
 helpers. Do not convert a sample table or image dimension into a universal
 rule until rendering supports it.
+
+Use an external adjacent or nearby figure caption as the threshold for a full
+figure-layout exemplar. Without one, an inline body drawing can supply only an
+editable local width/height helper; it cannot decide caption order or float
+policy. Keep an uncaptioned anchored drawing in the evidence ledger only. It
+may be page furniture or decoration even when it appears in the document body.
+Do not promote either uncaptioned case without a same-content PDF comparison.
 
 Decide object span from the object's local Word section, not from document-wide
 column mode or page width alone. Attach a section index to each selected table,
@@ -279,6 +356,16 @@ generic download endpoint, or `application/octet-stream`.
 Rebuild visible layout from the outside in. This order prevents a locally neat
 title block from hiding a wrong page frame or an extra page later in the body.
 
+Treat a layout diagnostic as a prioritization signal, not as a formatting
+instruction. A result such as `body_density` or
+`table_figure_caption_or_float` identifies the region to inspect; it does not
+justify changing body spacing or float policy across the package, much less in
+another journal. When a same-content reference is available, make one
+source-backed candidate change at a time, compare it to the ordinary package,
+and retain only a strict per-template improvement. Keep rejected candidates in
+the audit record so a later agent does not mistake an experiment for a source
+rule.
+
 1. Set paper size, orientation, text block, margins, columns, column gap, and
    header/footer occupancy in `journal-template.cls`. Read the Word section
    dimensions first: when they are not a standard LaTeX page size, preserve
@@ -355,6 +442,18 @@ title block from hiding a wrong page frame or an extra page later in the body.
    probe leaves the ordinary package unchanged. Keep detailed absolute audit
    paths in `promotion_report.json`; the promoted spec stores portable evidence
    names and hashes.
+   When a named generic body style conflicts with a visible flow-body exemplar,
+   keep both Word records immutable under `page.source_body_style`. The probe
+   may set only `document.render_calibration.body_style_mode` to
+   `visible_flow_exemplar`, initially with `status: render_probe`. Generation
+   reads that selection only after promotion changes the calibration to
+   `render_verified`; it must not add a `render_mode` field to the source-style
+   evidence or recast the visible exemplar as the named style.
+   After acceptance, generate a fresh final package from `verified_spec.json`
+   and pass the accepted `promotion_report.json` to generation. Compile and
+   validate that fresh package, not the regression candidate directory. The
+   candidate remains an audit artifact; the regenerated package is the only
+   render-calibrated deliverable.
    Map explicit Word centre/right heading alignment into the corresponding
    `\titleformat` declaration. Preserve a concrete Word heading colour as
    evidence and enable it only when a same-content colour candidate improves
@@ -391,7 +490,10 @@ title block from hiding a wrong page frame or an extra page later in the body.
    paragraphs; store the larger of previous space-after and next space-before
    and emit that value once. Do not also leave role-local skips at the same
    boundary.
-4. Rebuild heading numbering, spacing, and run-in behavior; then check body
+4. Rebuild heading numbering, spacing, run-in behavior, and an explicit
+   heading-level Word `keepNext` constraint. Map only an enabled source value
+   to the bounded `\Needspace{2\baselineskip}` class guard; `w:val="0"`, a
+   body paragraph, or missing evidence does not justify it. Then check body
    density again because headings change pagination.
 5. Rebuild table and figure width rules, float placement, captions, notes, and
    continued-float behavior. Do not solve a float mismatch by changing margins.
@@ -482,7 +584,10 @@ available. Enable a named Word CJK font only when it exists locally and a
 rendered comparison supports it. Otherwise retain the CTeX fallback chain and
 record the Word family as evidence-only. For Chinese-first templates, use
 Chinese abstract and keyword labels unless official evidence specifies a
-different bilingual order.
+different bilingual order. When source body examples are absent, keep all
+generated editable verification zones language-consistent: body headings,
+float captions and notes, footnotes, references, and appendix placeholders
+must not silently revert to English.
 
 When the source visibly contains both Chinese and English title-page metadata,
 ship editable bilingual front-matter fields in `main.tex`; do not collapse the

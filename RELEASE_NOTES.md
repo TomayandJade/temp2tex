@@ -1,26 +1,37 @@
-# temp2tex v0.1.0
+# Release Notes
 
-Initial public release of the `temp2tex` Codex skill.
+## v0.1.1
 
-## Included
+This release refines temp2tex as an agent-guidance skill for reconstructing
+editable LaTeX journal templates from official Word and related publisher
+evidence.
 
-- Evidence-led conversion from official journal Word templates to editable
-  LaTeX packages.
-- Default `journal-template.cls + main.tex` architecture.
-- English and Chinese fallback defaults when official requirements are absent.
-- Optional Word inspection, normalization, asset extraction, compilation, and
-  PDF layout comparison tools.
-- Regression methodology for official Word and LaTeX sources, including a
-  Word-render reference fallback when official LaTeX is unavailable.
+### Added
 
-## Verification
+- An atomic reconstruction protocol for paragraph/run, table-cell, drawing,
+  note, and page-furniture evidence.
+- Explicit phase gates from source evidence through role mapping, build, audit,
+  and handoff.
+- A source-feature coverage audit that requires editable LaTeX ownership or an
+  explicit gap for each observable source feature.
+- Same-content, role-level PDF comparison guidance for optional layout
+  verification.
 
-- Skill structural validation: passed.
-- Installable archive SHA-256:
-  `f9214d820f5f588d6f7029fc81ecbfeb36d105a4e8efbd760e465118b79edd46`.
-- Latest canonical 30-case run: all generated packages compiled; 22 cases
-  passed the hard layout gate.
+### Changed
 
-The official template corpus and generated regression outputs are excluded from
-the repository because they contain third-party publisher materials and large
-intermediate artifacts.
+- An initial converter output is now explicitly treated as a draft to audit,
+  not proof of template fidelity.
+- Table structure remains a full audit target; image-content differences may be
+  excluded only from the dedicated format metric while image geometry and flow
+  remain checked.
+- Chinese author detection guidance now separates author names from affiliations
+  and trailing formatting instructions.
+
+### Distribution
+
+Publisher-owned template sources, local training corpora, and generated
+regression workspaces remain excluded from the public repository.
+
+## v0.1.0
+
+Initial public release of the temp2tex Codex skill.

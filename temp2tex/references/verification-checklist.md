@@ -19,14 +19,44 @@ Confirm the output folder contains:
 - `figures/`
 - `assets/`
 - `template_spec.json`
+- `word_format_ledger.json` when the Word source was readable as an OpenXML package
 - `format_gap_log.md`
 - `README.md`
+- `source_feature_coverage.json` when `source_inventory.json` is present
 
 Run `validate_latex_package.py` when available. Treat a contract failure as a
 handoff blocker; treat its warnings as items to resolve or document. The check
 does not prove PDF fidelity, so retain the compile and visual stages below.
 
 Also check:
+
+- Read `source_feature_coverage.json` before rendering. Resolve or explicitly
+  retain its `critical` and `high` `needs_mapping` entries; do not use PDF
+  micro-calibration to compensate for a missing title, line-number, page
+  furniture, or run-typography mapping.
+- When `word_format_ledger.json` is present, confirm every source-backed role
+  decision names its paragraph/run evidence IDs and its editable LaTeX owner.
+  Resolve numbered pre-abstract affiliation lines before heading candidates;
+  do not let them become sections.
+- Perform the atomic reconstruction audit from
+  `references/atomic-reconstruction.md`: every selected paragraph/run, table
+  cell, drawing, note, and page-furniture record must be `mapped`, `default`,
+  `unresolved`, or `not_observable`. A generated package with unreviewed
+  proposed mappings is not ready for visual calibration.
+- Confirm local run formatting stays local unless all role-matched visible
+  runs support promotion. In particular, a trailing red instruction in an
+  author sample cannot colour the author class rule, and an instructional
+  caption cannot define the figure or table caption format.
+- Confirm `source_feature_coverage.json.ledger_role_audit` has no
+  `needs_mapping` record before visual calibration. A
+  `mapped_pending_visual_confirmation` role has an editable implementation,
+  but is still an explicit evidence/render task and must not be described as
+  visually matched.
+- Before visual calibration, create a role-level same-content anchor contract
+  for every applicable fixture zone. It must cover front matter, heading/body,
+  table/caption/note, figure/caption, notes, references, and appendix where
+  present. Every declared anchor must appear in both PDFs; a partial match is
+  a fixture failure, not permission to tune the class.
 
 - The template does not depend on stale `journal-template.sty` unless deliberately used as a compatibility shim.
 - `main.tex` compiles from the package root without absolute local paths.
@@ -52,6 +82,10 @@ Also check:
 - `main.tex` exercises each applicable module with real, compileable content: title/authors, abstract/keywords, headings/body, at least one table, figure, equation, footnote, bibliography citation/reference, and appendix. Class commands or empty placeholders do not count as coverage.
 - Confirm `main.tex` orders declarations/statements, references, then appendix; a bibliography fixture after `\journalappendix` is a hard package error.
 - For `zh` or `mixed` sources, retain Word Latin and East Asian fonts separately.
+- When `page.body_paragraph_spacing_evidence.status` is `source`, confirm the
+  saved instruction explicitly requires continuous body paragraphs and that the
+  class uses its recorded zero skip. A generic style after-space alone must not
+  override this source rule.
   If a named CJK font is not locally available and render-verified, keep the
   CTeX fallback and record the font gap instead of declaring it reproduced.
 - When Word uses an 8pt or 9pt body, confirm the generated class applies that
@@ -68,10 +102,13 @@ Also check:
   `format_gap_log.md` lists the affected roles and that the handoff does not
   claim visual matching before a populated same-content Word reference exists.
 - When `page.source_body_style.visible_flow_override_candidate` exists, keep
-  the named style in ordinary output and compare the explicit body-style probe
-  before enabling `render_mode: visible_flow_exemplar`. Reject it when page
-  count, required zones, or layout penalty worsens even if its mean pixel diff
-  is smaller.
+  the named style and visible Word exemplar immutable in ordinary output. Test
+  the explicit body-style probe through
+  `document.render_calibration.body_style_mode: visible_flow_exemplar`, first
+  with `status: render_probe` and then only after strict promotion with
+  `status: render_verified`. Reject it when page count, required zones, or
+  layout penalty worsens even if its mean pixel diff is smaller; never write a
+  render mode into `page.source_body_style`.
 - Apply `page.render_calibration` only after a same-content PDF comparison
   improves page-frame/body-box metrics without breaking page size, page count,
   or required structural zones. Keep the Word-derived margins and column gap
@@ -148,6 +185,19 @@ If a reference PDF and PDF tools are available, compare in this order:
    If a TOC field was detected, compile twice and compare its title, depth,
    page break, and page-number behavior before treating it as complete.
 6. Heading hierarchy and spacing.
+   Verify each heading level against a used Word style, a direct-format
+   exemplar, or an official instruction. Keep literal sample prefixes such as
+   `1 Introduction` separate from automatic Word numbering: enable LaTeX
+   counters only when a representative `w:numPr`, a used numbered heading
+   style, an instruction, or repeated rendered pages establishes the mechanism.
+   If heading evidence is absent, record the selected Chinese or English
+   fallback and make the populated Word comparison copy use that same fallback;
+   a plain-Word injected heading is not a valid reference for a styled LaTeX
+   default. Compare label visibility, numbering, size, weight, case, before and
+   after spacing, and run-in behavior separately. When an enabled Word
+   `keepNext` exists on a heading level, confirm that only that level receives
+   the bounded heading-plus-one-line page guard; an explicit `w:val="0"` must
+   not activate it.
 7. Body paragraph density, indentation, and line spacing.
    If the Word body font is installed locally, the generated class may use it
    behind a compile-safe `\IfFontExistsTF` fallback. Compare it as a measured
@@ -190,7 +240,16 @@ If a reference PDF and PDF tools are available, compare in this order:
    applying a template-wide width. Confirm any Word inline or anchored image
    placement against the PDF; XML anchor state alone does not justify changing
    the class-wide float policy. Retain source media in `assets/` even when its
-   final LaTeX position remains pending.
+   final LaTeX position remains pending. Do not insert a filled sample
+   manuscript's body artwork into the default `main.tex` fixture; use an
+   editable placeholder so the delivered package is a template rather than a
+   partially converted article.
+   Inspect `figures.layout_evidence.selection_status`. A caption-attached
+   drawing may support geometry and caption relation. An uncaptioned inline
+   drawing may support geometry only. An uncaptioned anchored drawing must
+   remain evidence-only and must not set the representative figure width,
+   caption position, or float policy. Each uncaptioned selection requires a
+   matching `format_gap_log.md` entry.
    Confirm an unverified non-floating option is stored only as
    `placement_calibration.status: render_probe` and leaves the generated class
    floating. Promote exactly one placement path at a time; require the same
@@ -198,6 +257,10 @@ If a reference PDF and PDF tools are available, compare in this order:
    non-worse maximum/layout metrics, and a non-worse float diagnostic score.
    Only the resulting `render_verified` acceptance may activate non-floating
    `journalfigure` or `journaltable` output.
+   When promotion accepts a candidate, regenerate the deliverable from
+   `verified_spec.json` plus `promotion_report.json`, then compile and run the
+   package validator on that regenerated directory. Never deliver the temporary
+   regression candidate as the final package.
    Confirm the selected drawing's paragraph maps to the recorded Word section.
    A near-column drawing should be about `\linewidth`, not half a column; only
    a clearly spanning source object may use `journalfigurewide`/`figure*`.

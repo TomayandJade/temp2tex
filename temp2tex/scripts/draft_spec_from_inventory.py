@@ -569,6 +569,12 @@ def table_layout_evidence(docx_item: dict | None) -> dict:
         "header_alignment": selected.get("header_alignment"),
         "header_vertical_alignment": selected.get("header_vertical_alignment"),
         "header_bold": bool(selected.get("header_bold")),
+        "header_bold_consensus": bool(selected.get("header_bold_consensus")),
+        "header_effective_font": selected.get("header_effective_font", {}),
+        "header_font_consensus": bool(selected.get("header_font_consensus")),
+        "header_cell_samples": selected.get("header_cell_samples", []),
+        "cell_format_samples": selected.get("cell_format_samples", []),
+        "cell_format_samples_truncated": bool(selected.get("cell_format_samples_truncated")),
         "header_row_height_twips": selected.get("header_row_height_twips"),
         "header_row_height_rule": selected.get("header_row_height_rule"),
         "caption_relation": selected.get("caption_relation", {}),
@@ -593,13 +599,63 @@ def figure_layout_evidence(docx_item: dict | None) -> dict:
         area = int(item.get("width_emu") or 0) * int(item.get("height_emu") or 0)
         return relation_rank, area
 
-    selected = max(drawings, key=drawing_score)
-    geometry = selected.get("geometry") if isinstance(selected.get("geometry"), dict) else {}
+    caption_attached = [
+        item for item in drawings
+        if isinstance(item.get("caption_relation"), dict)
+        and item["caption_relation"].get("position") in {"above", "below"}
+        and item["caption_relation"].get("confidence") in {"adjacent", "nearby"}
+    ]
     drawing_types = sorted({str(item.get("drawing_type") or "unknown") for item in drawings})
     wrap_types = sorted({str((item.get("geometry") or {}).get("wrap_type") or "none") for item in drawings if isinstance(item, dict)})
+    inline_unlabeled = [
+        item for item in drawings
+        if str(item.get("drawing_type") or "").lower() == "inline"
+    ]
+    if not caption_attached and not inline_unlabeled:
+        # A large anchor can be a logo, text-box decoration, or illustration
+        # unrelated to the manuscript figure contract. Retain short evidence
+        # for later rendering, but do not let it set a journal-wide figure
+        # width, span, or caption policy.
+        candidates = sorted(drawings, key=drawing_score, reverse=True)[:5]
+        return {
+            "source": "official Word body drawing XML",
+            "sample_count": len(drawings),
+            "caption_attached_sample_count": 0,
+            "selection_status": "no_caption_attached_body_figure",
+            "selection_reason": "no external adjacent or nearby Word figure caption was found",
+            "drawing_types": drawing_types,
+            "wrap_types": wrap_types,
+            "candidate_samples": [
+                {
+                    "paragraph_index": item.get("paragraph_index"),
+                    "drawing_type": item.get("drawing_type"),
+                    "width_emu": item.get("width_emu"),
+                    "height_emu": item.get("height_emu"),
+                    "caption_relation": item.get("caption_relation", {}),
+                }
+                for item in candidates
+            ],
+            "requires_visual_review": True,
+        }
+
+    if caption_attached:
+        selected = max(caption_attached, key=drawing_score)
+        selection_status = "caption_attached_body_figure"
+        selection_reason = "selected an external adjacent or nearby Word figure caption relation"
+    else:
+        # An inline Word drawing participates in paragraph flow. It is usable
+        # geometry evidence even when the template omits a matching caption,
+        # but it cannot establish a caption order or LaTeX float policy.
+        selected = max(inline_unlabeled, key=drawing_score)
+        selection_status = "inline_unlabeled_body_figure"
+        selection_reason = "selected an inline Word drawing for geometry only; no external adjacent or nearby caption was found"
+    geometry = selected.get("geometry") if isinstance(selected.get("geometry"), dict) else {}
     return {
         "source": "official Word body drawing XML",
         "sample_count": len(drawings),
+        "caption_attached_sample_count": len(caption_attached),
+        "selection_status": selection_status,
+        "selection_reason": selection_reason,
         "drawing_type": selected.get("drawing_type"),
         "drawing_types": drawing_types,
         "wrap_types": wrap_types,
@@ -772,6 +828,20 @@ def equation_layout_evidence(docx_item: dict | None) -> dict:
     body_samples = [sample for sample in samples if not sample.get("in_text_box")]
     display_samples = [sample for sample in body_samples if sample.get("display_like")]
     numbers = [number for sample in display_samples for number in sample.get("number_samples", [])]
+    converted = [sample for sample in body_samples if sample.get("translation_status") == "converted"]
+    partial = [sample for sample in body_samples if sample.get("translation_status") != "converted"]
+    candidates = [
+        {
+            "index": sample.get("index"),
+            "display_like": bool(sample.get("display_like")),
+            "in_table_cell": bool(sample.get("in_table_cell")),
+            "latex": sample.get("latex"),
+            "translation_status": sample.get("translation_status"),
+            "unsupported_nodes": sample.get("unsupported_nodes", []),
+            "source_structure": sample.get("structure", []),
+        }
+        for sample in body_samples[:20]
+    ]
     return {
         "present": True,
         "sample_count": len(body_samples),
@@ -780,7 +850,10 @@ def equation_layout_evidence(docx_item: dict | None) -> dict:
         "number_samples": numbers[:8],
         "table_cell_samples": sum(1 for sample in body_samples if sample.get("in_table_cell")),
         "source": "official Word OMML equation XML",
-        "requires_math_translation": any(sample.get("requires_math_translation") for sample in body_samples),
+        "converted_sample_count": len(converted),
+        "manual_translation_sample_count": len(partial),
+        "latex_candidates": candidates,
+        "requires_math_translation": bool(partial),
         "requires_visual_review": True,
     }
 
@@ -1112,11 +1185,29 @@ def body_style_evidence(docx_item: dict | None) -> dict:
     return direct_paragraph_evidence(selected, "body")
 
 
+def line_number_evidence(docx_item: dict | None, evidence: str) -> dict:
+    """Prefer Word section properties over prose that merely mentions line numbers."""
+    structural = docx_item.get("inspection", {}).get("line_numbering", {}) if docx_item else {}
+    if isinstance(structural, dict) and structural.get("enabled"):
+        return {
+            "enabled": True,
+            "status": "source",
+            "source": structural.get("source", "official Word section line-numbering properties"),
+            "sections": structural.get("sections", []),
+        }
+    mentioned = contains(evidence, "line numbering", "line numbers")
+    return {
+        "enabled": bool(mentioned),
+        "status": "instruction" if mentioned else "not_detected",
+        "source": "official template instruction text" if mentioned else "no Word line-numbering property or instruction found",
+    }
+
+
 def direct_paragraph_evidence(paragraph: dict, role: str) -> dict:
     """Represent direct paragraph formatting when a Word role has no style."""
     direct = paragraph.get("direct_format") or {}
     effective = paragraph.get("effective_format") or direct
-    return {
+    result = {
         "style_id": paragraph.get("style_id"),
         "style_name": paragraph.get("style_name"),
         "role": role,
@@ -1125,8 +1216,135 @@ def direct_paragraph_evidence(paragraph: dict, role: str) -> dict:
         "effective_format": effective,
         "sample_text": str(paragraph.get("text", ""))[:220],
         "sample_paragraph_index": paragraph.get("index"),
+        "evidence_status": "visible_role_exemplar",
         "source": "direct Word paragraph formatting; no semantic paragraph style",
     }
+    spans = paragraph.get("format_spans")
+    if isinstance(spans, list) and spans:
+        result["format_spans"] = spans
+        result["format_span_text"] = paragraph.get("format_span_text", paragraph.get("text", ""))
+    return result
+
+
+def latin_text_ratio(text: str) -> float:
+    visible = [character for character in text if not character.isspace()]
+    if not visible:
+        return 0.0
+    return sum(character.isascii() and character.isalpha() for character in visible) / len(visible)
+
+
+def english_front_matter_evidence(docx_item: dict | None) -> dict[str, dict]:
+    """Recover bilingual role exemplars without borrowing Chinese front matter.
+
+    Mixed-language Word templates often place the English title block after
+    Chinese keywords and before the first numbered body heading. Select only
+    those role-shaped paragraphs; Chinese funding/author-note paragraphs and
+    later English prose are deliberately excluded.
+    """
+    if not docx_item:
+        return {}
+    paragraphs = [
+        item for item in docx_item.get("inspection", {}).get("paragraph_samples", [])
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    if not paragraphs:
+        return {}
+    chinese_keyword_index = next(
+        (
+            int(item.get("index") or 0)
+            for item in paragraphs
+            if str(item.get("text") or "").strip().startswith(("关键词", "关键字"))
+        ),
+        None,
+    )
+    if chinese_keyword_index is None:
+        return {}
+    heading_indexes = {
+        int(item.get("index") or 0)
+        for item in docx_item.get("inspection", {}).get("heading_candidates", [])
+        if isinstance(item, dict) and not is_affiliation_like(str(item.get("text") or ""))
+    }
+    body_end = min((index for index in heading_indexes if index > chinese_keyword_index), default=10**9)
+    window = [
+        item for item in paragraphs
+        if chinese_keyword_index < int(item.get("index") or 0) < body_end
+        and latin_text_ratio(str(item.get("text") or "")) >= 0.45
+    ]
+    if not window:
+        return {}
+    abstract = next((item for item in window if str(item.get("text") or "").strip().lower().startswith("abstract")), None)
+    abstract_index = int(abstract.get("index") or 0) if abstract else body_end
+    title = next(
+        (
+            item for item in window
+            if int(item.get("index") or 0) < abstract_index
+            and len(str(item.get("text") or "").strip()) >= 20
+            and not re.match(r"^\d+[.)]\s*", str(item.get("text") or "").strip())
+        ),
+        None,
+    )
+    title_index = int(title.get("index") or 0) if title else chinese_keyword_index
+    affiliation_markers = ("university", "college", "institute", "department", "laboratory", "school")
+    affiliation = next(
+        (
+            item for item in window
+            if title_index < int(item.get("index") or 0) < abstract_index
+            and (
+                bool(re.match(r"^\d+[.)]\s*", str(item.get("text") or "").strip()))
+                or any(marker in str(item.get("text") or "").lower() for marker in affiliation_markers)
+            )
+        ),
+        None,
+    )
+    affiliation_index = int(affiliation.get("index") or 0) if affiliation else abstract_index
+    author = next(
+        (
+            item for item in window
+            if title_index < int(item.get("index") or 0) < affiliation_index
+            and not any(marker in str(item.get("text") or "").lower() for marker in affiliation_markers)
+        ),
+        None,
+    )
+    keywords = next(
+        (
+            item for item in window
+            if int(item.get("index") or 0) > abstract_index
+            and str(item.get("text") or "").strip().lower().startswith(("keywords", "key words"))
+        ),
+        None,
+    )
+    selected = {
+        "title": title,
+        "author": author,
+        "affiliation": affiliation,
+        "abstract": abstract,
+        "keywords": keywords,
+    }
+    return {
+        name: direct_paragraph_evidence(paragraph, f"english_{name}")
+        for name, paragraph in selected.items()
+        if paragraph is not None
+    }
+
+
+def visible_reference_entry_evidence(docx_item: dict | None) -> dict:
+    """Use the first actual reference-zone entry when no semantic style exists."""
+    if not docx_item:
+        return {}
+    seen_heading = False
+    markers = ("references", "reference", "bibliography", "参考文献", "参考资料")
+    for paragraph in docx_item.get("inspection", {}).get("paragraph_samples", []):
+        if not isinstance(paragraph, dict):
+            continue
+        text = str(paragraph.get("text") or "").strip()
+        if not text:
+            continue
+        if text.lower() in markers or text.startswith(("参考文献", "参考资料")):
+            seen_heading = True
+            continue
+        if seen_heading and len(text) >= 8:
+            return direct_paragraph_evidence(paragraph, "reference_entry")
+    return {}
 
 
 def role_evidence_or_default(evidence: dict, role: str) -> dict:
@@ -1167,33 +1385,79 @@ def semantic_role_evidence(docx_item: dict | None, *role_terms: str) -> dict:
             "keywords", "instructions", "please ", "a concise",
         )
 
-        def title_predicate(text: str, index: int) -> bool:
+        def title_score(item: dict) -> int:
+            text = text_of(item)
+            index = int(item.get("index") or 0)
             normalized = re.sub(r"\s+", " ", text.lower()).strip(" *")
+            style_name = str(item.get("style_name") or "").lower()
+            if index > 20 or not 6 <= len(text) <= 220:
+                return 0
+            if normalized in KNOWN_SECTION_TITLES or normalized in {"sections", "highlights", "template"}:
+                return 0
+            if "heading" in style_name or "keyword" in style_name or "caption" in style_name:
+                return 0
+            if normalized.startswith(guidance_prefixes) or any(
+                marker in normalized for marker in ("submission instructions", "author instructions", "delete this instruction")
+            ):
+                return 0
+            if normalized.startswith(("(", "[", "in order", "note:", "please ", "this template")):
+                return 0
             if normalized in title_markers:
-                return True
-            if index > 12 or not 6 <= len(text) <= 220:
-                return False
-            if normalized.startswith(guidance_prefixes):
-                return False
-            # A sentence-like instruction at the start of a document is not
-            # a title exemplar. Keep real title candidates conservative when
-            # the Word file has no semantic title style.
+                return 1200
             if text.rstrip().endswith((".", ":", ";", "?", "!")):
-                return False
-            return True
+                return 0
+            score = 0
+            if re.search(r"\b(?:your|paper|article|manuscript|full)\b.*\btitle\b", normalized):
+                score += 500
+            if "title" in style_name:
+                score += 650
+            font = (item.get("effective_format") or {}).get("font") or {}
+            try:
+                size = int(font.get("size_half_points") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            # A title with no semantic name needs genuinely title-like type:
+            # early position plus at least 14pt. This avoids promoting normal
+            # instructional prose, author notes, or a first body heading.
+            if score == 0 and (index > 8 or size < 28):
+                return 0
+            score += min(max(size - 24, 0), 32) * 4
+            if font.get("bold"):
+                score += 80
+            return score
 
-        predicate = title_predicate
+        candidates = [(title_score(item), item) for item in paragraphs]
+        candidates = [item for item in candidates if item[0] > 0]
+        if candidates:
+            return direct_paragraph_evidence(max(candidates, key=lambda item: item[0])[1], role)
+        return {}
     elif "author" in role_terms_lower:
         author_noise = (
             "date of publication", "date of current version", "received", "accepted",
             "copyright", "corresponding author", "e-mail", "email", "abstract", "keywords",
+            "作者简介", "通讯作者", "基金项目", "图表", "字体", "行距", "模板", "题目",
+            "单位", "部门", "地址", "邮编", "省市", "大学", "学院", "研究所", "实验室",
         )
-        predicate = lambda text, index: (
-            index <= 12
-            and ("\uff0c" in text or "," in text or " and " in text.lower() or "\u3001" in text)
-            and not any(marker in text.lower() for marker in author_noise)
-            and not text.startswith(("\u6458\u8981", "\u5173\u952e\u8bcd"))
+        chinese_author_sequence = re.compile(
+            r"^(?:[\u3400-\u9fff]{2,4}\s*\d{0,2}\s*[,，、；;]\s*)+[\u3400-\u9fff]{2,4}"
         )
+
+        def author_candidate(text: str, index: int) -> bool:
+            lower = text.lower()
+            if index > 24 or any(marker in lower for marker in author_noise):
+                return False
+            if text.startswith(("\u6458\u8981", "\u5173\u952e\u8bcd")):
+                return False
+            if chinese_author_sequence.search(text):
+                return True
+            # Retain the established English path, but require more than a
+            # generic comma-separated instruction sentence.
+            return bool(
+                (" and " in lower or "," in text)
+                and re.search(r"\b[A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){1,3}\b", text)
+            )
+
+        predicate = author_candidate
     elif {"affiliation", "address", "institution"} & role_terms_lower:
         affiliation_markers = ("university", "college", "institute", "department", "\u5927\u5b66", "\u5b66\u9662", "\u7814\u7a76\u6240", "\u5355\u4f4d", "\u90ae\u7f16")
         predicate = lambda text, index: index <= 16 and any(marker in text.lower() for marker in affiliation_markers)
@@ -1357,6 +1621,22 @@ def role_style_evidence(docx_item: dict | None, *role_terms: str) -> dict:
         "sample_in_table_cells": any(item.get("in_table_cell") for item in samples),
     }
     selected_has_visible_sample = bool(str(sample.get("text", "")).strip())
+    if selected_has_visible_sample:
+        # A used semantic role is direct source evidence. Preserve its run
+        # ledger so later class generation and coverage checks distinguish a
+        # visible title/label from an unused named Word style.
+        result.update({
+            "evidence_status": "source",
+            "source": "used semantic Word paragraph style with visible role exemplar",
+            "format_spans": sample.get("format_spans") or [],
+            "format_span_text": sample.get("format_span_text") or str(sample.get("text") or ""),
+        })
+    if requested == {"title"} and not selected_has_visible_sample:
+        direct = semantic_role_evidence(docx_item, *role_terms)
+        if direct:
+            direct["evidence_status"] = "visible_role_exemplar"
+            direct["source"] = "visible Word title exemplar with direct paragraph/run formatting"
+            return direct
     if not usage.get(str(selected.get("style_id") or ""), 0) or (requested == {"title"} and not selected_has_visible_sample):
         result["evidence_status"] = "template_style_candidate"
         result["source"] = "named semantic title style in official Word template; no visible title exemplar"
@@ -1649,6 +1929,7 @@ def heading_style_evidence(docx_item: dict | None, level: int) -> dict:
     if not docx_item:
         return {}
     inspection = docx_item.get("inspection", {})
+    abstract_index = first_abstract_paragraph_index(inspection)
     usage: dict[str, int] = {}
     for paragraph in inspection.get("paragraph_samples", []):
         style_id = paragraph.get("style_id")
@@ -1688,6 +1969,14 @@ def heading_style_evidence(docx_item: dict | None, level: int) -> dict:
         for paragraph in inspection.get("paragraph_samples", []):
             if paragraph.get("in_table_cell"):
                 continue
+            try:
+                paragraph_index = int(paragraph.get("index") or 0)
+            except (TypeError, ValueError):
+                paragraph_index = 0
+            # Numbered affiliations frequently appear before a Chinese abstract
+            # in Word templates that use Normal for every paragraph.
+            if abstract_index is not None and 0 < paragraph_index < abstract_index:
+                continue
             text = str(paragraph.get("text", "")).strip()
             match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?[.)]?\s+\S+", text)
             if not match or is_affiliation_like(text):
@@ -1723,8 +2012,13 @@ def content_box_evidence(style_evidence: dict) -> dict | None:
     }
 
 
-def infer_font_size(docx_item: dict | None, evidence: str, columns: str) -> float | int:
-    body = body_style_evidence(docx_item)
+def infer_font_size(
+    docx_item: dict | None,
+    evidence: str,
+    columns: str,
+    body_override: dict | None = None,
+) -> float | int:
+    body = body_override or body_style_evidence(docx_item)
     body_format = body.get("effective_format", body.get("direct_format", {}))
     half_points = body_format.get("font", {}).get("size_half_points")
     try:
@@ -1742,9 +2036,9 @@ def infer_font_size(docx_item: dict | None, evidence: str, columns: str) -> floa
     return 10 if columns == "double" else 12
 
 
-def infer_font_family(docx_item: dict | None) -> str | None:
+def infer_font_family(docx_item: dict | None, body_override: dict | None = None) -> str | None:
     """Return an explicitly declared body font, never a guessed publisher font."""
-    body = body_style_evidence(docx_item)
+    body = body_override or body_style_evidence(docx_item)
     body_format = body.get("effective_format", body.get("direct_format", {}))
     family = body_format.get("font", {}).get("family")
     if not family:
@@ -1753,9 +2047,9 @@ def infer_font_family(docx_item: dict | None) -> str | None:
     return family or None
 
 
-def infer_cjk_font_family(docx_item: dict | None) -> str | None:
+def infer_cjk_font_family(docx_item: dict | None, body_override: dict | None = None) -> str | None:
     """Retain an explicitly declared East Asian body font without applying it blindly."""
-    body = body_style_evidence(docx_item)
+    body = body_override or body_style_evidence(docx_item)
     body_format = body.get("effective_format", body.get("direct_format", {}))
     family = body_format.get("font", {}).get("east_asia_family")
     if not family and docx_item:
@@ -1766,8 +2060,13 @@ def infer_cjk_font_family(docx_item: dict | None) -> str | None:
     return family or None
 
 
-def infer_line_spacing(docx_item: dict | None, evidence: str, columns: str) -> float:
-    body = body_style_evidence(docx_item)
+def infer_line_spacing(
+    docx_item: dict | None,
+    evidence: str,
+    columns: str,
+    body_override: dict | None = None,
+) -> float:
+    body = body_override or body_style_evidence(docx_item)
     body_format = body.get("effective_format", body.get("direct_format", {}))
     paragraph = body_format.get("paragraph", {})
     try:
@@ -1782,6 +2081,135 @@ def infer_line_spacing(docx_item: dict | None, evidence: str, columns: str) -> f
     if contains(evidence, "single-spacing", "single spacing", "single-spaced", "single spaced"):
         return 1.0
     return 1.0 if columns == "double" else 1.15
+
+
+def comment_body_format_directive(comments: list[dict], body_evidence: dict) -> dict | None:
+    """Recover a narrowly-scoped body-format rule from an anchored comment.
+
+    Word comments are normally non-binding guidance. This admits only an
+    explicit role + numeric-format directive and refuses it if the selected
+    visible/named body evidence supplies a conflicting value. The accepted
+    directive is retained with its comment identity for later audit.
+    """
+    chinese_size_points = {"五": 10.5, "5": 10.5}
+    effective = body_evidence.get("effective_format") or body_evidence.get("direct_format") or {}
+    existing_font = effective.get("font") or {}
+    existing_paragraph = effective.get("paragraph") or {}
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        text = re.sub(r"\s+", "", str(comment.get("text") or ""))
+        anchors = comment.get("anchor_paragraph_indexes") or {}
+        anchor_indexes = anchors.get("reference") or anchors.get("start") or []
+        targets_body = bool(re.search(r"正文|主体文字|bodytext|maintext", text, flags=re.I))
+        if not targets_body or not anchor_indexes:
+            continue
+        font: dict[str, str] = {}
+        paragraph: dict[str, str] = {}
+        font_size_pt = None
+        if "宋体" in text:
+            # Map the Chinese typeface name to the fontconfig/CTeX name while
+            # retaining the original wording in the source record.
+            font["east_asia_family"] = "SimSun"
+        size_match = re.search(r"([五5])号(?:字|字体)?", text)
+        if size_match:
+            font_size_pt = chinese_size_points[size_match.group(1)]
+            font["size_half_points"] = str(int(font_size_pt * 2))
+        else:
+            point_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:pt|磅)", text, flags=re.I)
+            if point_match and ("字体" in text or "字号" in text or "font" in text.lower()):
+                font_size_pt = float(point_match.group(1))
+                if 5 <= font_size_pt <= 24:
+                    font["size_half_points"] = str(int(round(font_size_pt * 2)))
+        spacing_match = re.search(r"(?:行距|linespacing|leading)[^0-9]{0,8}(\d+(?:\.\d+)?)\s*(?:pt|磅)", text, flags=re.I)
+        if spacing_match:
+            spacing_pt = float(spacing_match.group(1))
+            if 6 <= spacing_pt <= 72:
+                paragraph["line_spacing"] = str(int(round(spacing_pt * 20)))
+                paragraph["line_spacing_rule"] = "exact"
+        if not font and not paragraph:
+            continue
+        conflicts = []
+        expected_size = font.get("size_half_points")
+        actual_size = existing_font.get("size_half_points")
+        if expected_size and actual_size and str(expected_size) != str(actual_size):
+            conflicts.append({"property": "font.size_half_points", "selected_body_value": actual_size, "comment_value": expected_size})
+        expected_family = font.get("east_asia_family")
+        actual_family = existing_font.get("east_asia_family")
+        if expected_family and actual_family and str(expected_family).lower() != str(actual_family).lower():
+            conflicts.append({"property": "font.east_asia_family", "selected_body_value": actual_family, "comment_value": expected_family})
+        expected_line = paragraph.get("line_spacing")
+        actual_line = existing_paragraph.get("line_spacing")
+        actual_rule = str(existing_paragraph.get("line_spacing_rule") or "").lower()
+        if expected_line and actual_line and actual_rule == "exact" and str(expected_line) != str(actual_line):
+            conflicts.append({"property": "paragraph.line_spacing", "selected_body_value": actual_line, "comment_value": expected_line})
+        status = "accepted" if not conflicts else "rejected_conflict"
+        return {
+            "status": status,
+            "target_role": "body",
+            "comment_id": str(comment.get("id") or ""),
+            "comment_index": comment.get("index"),
+            "anchor_paragraph_indexes": anchors,
+            "instruction_text": str(comment.get("text") or ""),
+            "parsed_format": {"font": font, "paragraph": paragraph},
+            "conflict_check": {
+                "selected_body_style": body_evidence.get("style_name"),
+                "selected_body_style_id": body_evidence.get("style_id"),
+                "conflicts": conflicts,
+                "result": "no_conflict" if not conflicts else "conflict",
+            },
+        }
+    return None
+
+
+def apply_comment_body_format(body_evidence: dict, directive: dict | None) -> dict:
+    """Apply a pre-validated comment directive without losing named-style evidence."""
+    if not directive or directive.get("status") != "accepted":
+        return body_evidence
+    enriched = copy.deepcopy(body_evidence)
+    parsed = directive.get("parsed_format") or {}
+    for key in ("direct_format", "effective_format"):
+        target = enriched.setdefault(key, {})
+        for format_group in ("font", "paragraph"):
+            additions = parsed.get(format_group) or {}
+            if additions:
+                target.setdefault(format_group, {}).update(additions)
+    enriched["comment_format_evidence"] = directive
+    enriched["source"] = (
+        f"{body_evidence.get('source', 'selected official Word body evidence')}; "
+        "supplemented by an anchored explicit Word formatting comment after conflict check"
+    )
+    return enriched
+
+
+def body_paragraph_spacing_evidence(evidence: str) -> dict:
+    """Keep explicit no-gap author guidance separate from a Word style default.
+
+    Word templates often use a paragraph after-space to make instructional
+    samples readable, while their prose explicitly says that manuscript body
+    paragraphs continue without blank separation. That sentence is stronger
+    evidence for the ordinary LaTeX body than a generic ``Normal`` style.
+    """
+    text = re.sub(r"\s+", " ", str(evidence or "")).strip()
+    patterns = (
+        r"[^.]{0,120}\bparagraphs?\b[^.]{0,120}\bonly\s+separated\s+by\s+(?:headings?|subheadings?|images?|figures?|tables?|formulae?|equations?)[^.]{0,120}",
+        r"[^.]{0,120}\bparagraphs?\b[^.]{0,120}\b(?:without|with no)\s+(?:extra\s+)?(?:space|spacing|blank lines?)[^.]{0,120}",
+        r"[^.]{0,120}\bdo\s+not\s+(?:leave|insert|add)\s+(?:an?\s+)?(?:blank line|extra\s+space)\s+(?:between|after)\s+paragraphs?[^.]{0,120}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.I)
+        if match:
+            return {
+                "status": "source",
+                "paragraph_skip_pt": 0,
+                "source": "explicit official template guidance for continuous body paragraphs",
+                "matched_instruction": match.group(0).strip(),
+                "mapping": "override generic Word body after-space with zero LaTeX paragraph skip",
+            }
+    return {
+        "status": "not_detected",
+        "source": "no explicit continuous-body-paragraph instruction was found",
+    }
 
 
 def infer_paragraph_indent(docx_item: dict | None, language: str) -> str:
@@ -1850,6 +2278,21 @@ def is_affiliation_like(text: str) -> bool:
         "office", "\u5927\u5b66", "\u5b66\u9662", "\u7814\u7a76\u6240", "\u5b9e\u9a8c\u5ba4", "\u5355\u4f4d", "\u90ae\u7f16",
     )
     return any(marker in lower for marker in markers)
+
+
+def first_abstract_paragraph_index(inspection: dict) -> int | None:
+    """Find the visible abstract boundary before inferring numbered headings."""
+    indexes = []
+    for paragraph in inspection.get("paragraph_samples", []):
+        text = str(paragraph.get("text") or "").strip().lower()
+        if text.startswith(("abstract", "摘要", "中文摘要", "英文摘要")):
+            try:
+                index = int(paragraph.get("index") or 0)
+            except (TypeError, ValueError):
+                continue
+            if index > 0:
+                indexes.append(index)
+    return min(indexes) if indexes else None
 
 
 def build_sections(docx_item: dict | None) -> list[dict]:
@@ -2005,14 +2448,15 @@ def main() -> int:
         "figure_caption",
     )
     table_note_style_evidence = role_style_evidence(docx, "table footer", "table note")
-    reference_entry_style_evidence = role_style_evidence(docx, "references", "reference", "bibliography")
+    reference_entry_style_evidence = (
+        role_style_evidence(docx, "references", "reference", "bibliography")
+        or visible_reference_entry_evidence(docx)
+    )
+    english_front_matter_styles = english_front_matter_evidence(docx)
     heading_style_evidences = {
         f"level{level}": heading_style_evidence(docx, level)
         for level in range(5)
     }
-    font_size = infer_font_size(docx, evidence, columns)
-    font_family = infer_font_family(docx)
-    cjk_font_family = infer_cjk_font_family(docx)
     header_footer = header_footer_evidence(docx)
     header_footer["safe_text_parts"] = text_only_furniture_parts(header_footer)
     page_frame = infer_page_frame(docx, columns)
@@ -2021,6 +2465,11 @@ def main() -> int:
     column_breaks = column_break_evidence(docx)
     representative_page_section = representative_section(docx, columns)
     word_media = docx.get("inspection", {}).get("images", []) if docx else []
+    vml_shapes = docx.get("inspection", {}).get("vml_shapes", []) if docx else []
+    if docx:
+        for part in docx.get("inspection", {}).get("header_footer_parts", []):
+            if isinstance(part, dict):
+                vml_shapes.extend(part.get("vml_shapes", []))
     table_layout = table_layout_evidence(docx)
     figure_layout = figure_layout_evidence(docx)
     if table_layout:
@@ -2050,9 +2499,21 @@ def main() -> int:
     endnote_style = endnote_style_evidence(docx)
     footnote_count = int(docx.get("inspection", {}).get("footnote_count", 0) or 0) if docx else 0
     endnote_count = int(docx.get("inspection", {}).get("endnote_count", 0) or 0) if docx else 0
+    footnote_numbering = docx.get("inspection", {}).get("footnote_numbering", {}) if docx else {}
+    endnote_numbering = docx.get("inspection", {}).get("endnote_numbering", {}) if docx else {}
+    footnote_references = docx.get("inspection", {}).get("footnote_references", []) if docx else []
+    endnote_references = docx.get("inspection", {}).get("endnote_references", []) if docx else []
     cover = cover_evidence(docx)
     toc = toc_evidence(docx)
+    line_numbering = line_number_evidence(docx, evidence)
     fallbacks = inaccessible_word_fallbacks(inventory, inventory_path)
+    content_controls = docx.get("inspection", {}).get("content_controls", []) if docx else []
+    comments_evidence = docx.get("inspection", {}).get("comments", []) if docx else []
+    body_comment_directive = comment_body_format_directive(comments_evidence, style_evidence)
+    style_evidence = apply_comment_body_format(style_evidence, body_comment_directive)
+    font_size = infer_font_size(docx, evidence, columns, style_evidence)
+    font_family = infer_font_family(docx, style_evidence)
+    cjk_font_family = infer_cjk_font_family(docx, style_evidence)
 
     text_boxes = docx.get("inspection", {}).get("text_boxes", []) if docx else []
     if text_boxes:
@@ -2092,6 +2553,14 @@ def main() -> int:
             "fallback_used": "Exposed editable journalitemize/journalenumerate interfaces using the first visible Word list evidence.",
             "source_checked": str(inventory_path),
             "latex_location": "journal-template.cls / main.tex",
+        })
+    if figure_layout.get("selection_status") in {"no_caption_attached_body_figure", "inline_unlabeled_body_figure"}:
+        fallbacks.append({
+            "area": "figures.layout_evidence",
+            "missing_requirement": "Word body drawings exist, but none has an external adjacent or nearby figure-caption relation.",
+            "fallback_used": "An inline drawing may supply geometry only; anchored candidates remain evidence-only. Do not promote caption order or a float policy without same-content PDF confirmation.",
+            "source_checked": str(inventory_path),
+            "latex_location": "template_spec.json / journal-template.cls / format_gap_log.md",
         })
 
     sections = build_sections(docx)
@@ -2135,6 +2604,16 @@ def main() -> int:
             "language": language if language in {"zh", "mixed"} else "en",
             "short_title": journal_name,
         },
+        "source_annotations": {
+            "content_controls": content_controls[:80],
+            "comments": comments_evidence[:40],
+            "comment_format_directives": [body_comment_directive] if body_comment_directive else [],
+            "instruction": (
+                "Use control metadata and Word comments as supporting template evidence. "
+                "Do not emit comment text into manuscript body content or claim it is visible source text. "
+                "An explicit anchored formatting directive is adopted only after its target role, parsed value, and conflict check are recorded."
+            ),
+        },
         "document": {
             "paper": infer_paper(docx, columns),
             "paper_dimensions_mm": infer_paper_dimensions_mm(docx, columns),
@@ -2155,7 +2634,8 @@ def main() -> int:
             "representative_section_index": representative_page_section.get("index") if representative_page_section else None,
             "representative_section_source": "most frequent manuscript-body Word section frame",
             "section_flow": section_flow_evidence(docx),
-            "line_spacing": infer_line_spacing(docx, evidence, columns),
+            "line_spacing": infer_line_spacing(docx, evidence, columns, style_evidence),
+            "body_paragraph_spacing_evidence": body_paragraph_spacing_evidence(evidence),
             "paragraph_indent": infer_paragraph_indent(docx, language),
             "column_sep_mm": infer_column_sep_mm(docx, columns),
             "column_widths_twips": column_widths_twips,
@@ -2186,6 +2666,11 @@ def main() -> int:
             "author_style": author_style_evidence,
             "author_layout": author_layout_evidence(author_style_evidence),
             "affiliation_style": affiliation_style_evidence,
+            "english_title_style": role_evidence_or_default(english_front_matter_styles.get("title", {}), "english_title"),
+            "english_author_style": role_evidence_or_default(english_front_matter_styles.get("author", {}), "english_author"),
+            "english_affiliation_style": role_evidence_or_default(english_front_matter_styles.get("affiliation", {}), "english_affiliation"),
+            "english_abstract_style": role_evidence_or_default(english_front_matter_styles.get("abstract", {}), "english_abstract"),
+            "english_keywords_style": role_evidence_or_default(english_front_matter_styles.get("keywords", {}), "english_keywords"),
             "spacing_boundaries": front_matter_boundaries,
         },
         "abstracts": {
@@ -2219,7 +2704,8 @@ def main() -> int:
             "toc_evidence": toc,
             "lists": list_layout,
             "toc_depth": toc.get("depth"),
-            "line_numbers": contains(evidence, "line numbering", "line numbers"),
+            "line_numbers": line_numbering["enabled"],
+            "line_number_evidence": line_numbering,
             "sections": sections,
             "content_box": content_box_evidence(style_evidence),
             "keyword_content_box": content_box_evidence(keyword_style_evidence),
@@ -2255,16 +2741,20 @@ def main() -> int:
             "entry_style": reference_entry_style_evidence,
         },
         "footnotes": {
-            "enabled": bool(footnote_style),
+            "enabled": bool(footnote_style) or bool(footnote_references),
             "style": footnote_style,
-            "marker_style": "source-not-extracted",
+            "marker_style": footnote_numbering.get("marker_style", "source-not-extracted"),
+            "marker_evidence": footnote_numbering,
+            "reference_evidence": footnote_references[:40],
             "count_in_template": footnote_count,
         },
         "endnotes": {
-            "enabled": bool(endnote_style),
+            "enabled": bool(endnote_style) or bool(endnote_references),
             "style": endnote_style,
             "count_in_template": endnote_count,
             "placement": "source-not-extracted",
+            "marker_evidence": endnote_numbering,
+            "reference_evidence": endnote_references[:40],
         },
         "appendices": {
             "enabled": contains(evidence, "appendix", "appendices"),
@@ -2278,6 +2768,7 @@ def main() -> int:
         },
         "assets": {
             "word_media": word_media,
+            "vml_shapes": vml_shapes[:100],
             "header_footer_parts": header_footer["parts"],
             "text_boxes": text_boxes,
             "extraction_required": bool(word_media),

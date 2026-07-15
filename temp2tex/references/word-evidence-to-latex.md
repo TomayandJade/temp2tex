@@ -1,7 +1,91 @@
 # Word Evidence To LaTeX
 
+## Run Decorations
+
+Preserve run-local underline style, single or double strike state, and
+superscript or subscript state in the evidence ledger. Render them only
+around the affected text range. The generated package uses editable LaTeX
+underline, strikeout, superscript, and subscript commands; when Word requests
+a rare decoration such as double underline, retain the original variant in
+the ledger and use the closest stable editable command until PDF comparison
+supports a more exact mapping.
+
+## Tracked Revisions
+
+Treat inserted Word text as current visible source evidence. Exclude deleted
+and moved-from text from paragraph samples and character-run spans, even when
+the XML still contains it. Record insertion, deletion, and moved-from counts
+in the source inventory so a reviewer can identify a revision-bearing template.
+Do not emit deleted template instructions or formatting as LaTeX content.
+
+## Content Controls And Comments
+
+Retain each Word structured document tag with its visible text, type, tag,
+alias, lock, placeholder state, source part, and paragraph location. Use this
+metadata only as a semantic tie-breaker after checking the visible template
+role and surrounding source evidence. A control named Title does not, by
+itself, prove a manuscript-title role.
+
+Retain each Word comment with author, date, text, and body anchor positions.
+Comments often provide useful author instructions, but are not visible
+manuscript content. Do not copy comment text into LaTeX body text. When a
+comment supplies a rule not present elsewhere, record it as comment-backed
+guidance and flag any conflict with visible source or official instructions.
+Adopt a comment-derived formatting value only when its anchor is known, it
+names a semantic role, it states a parseable value, and the selected
+role-matched Word/PDF evidence has no stronger conflicting value. Preserve the
+comment ID, anchor, parsed value, and conflict result in `template_spec.json`.
+
+## Footnote And Endnote Anchors
+
+Record each body footnote or endnote reference with its note ID, anchor
+paragraph, local marker formatting, and linked note text. Read explicit
+numbering from Word settings rather than inferring it from sample note IDs.
+Map only explicit non-default settings such as lower-letter, upper-letter,
+Roman, or symbol markers to the body LaTeX footnote counter. Keep title-page
+author markers separate because they commonly use symbols while body notes
+use a different sequence.
+
+## VML Compatibility Drawings
+
+Inspect VML picture containers in legacy or compatibility Word templates.
+Retain image relationship and media part, shape identifier, VML style geometry,
+text-box text, and OLE program marker. Use a linked image as an editable asset
+candidate; do not directly apply VML absolute placement without a same-content
+render comparison.
+
+## Hyperlink Runs
+
+Treat a Word external hyperlink as a local run property, not as ordinary text
+or a paragraph-wide style. Preserve the displayed text range and its external
+relationship target together. Map only well-formed http(s) and mailto targets
+to an editable LaTeX hyperlink around the matching text. Internal anchors,
+file links, malformed targets, and unresolved relationships remain in the
+evidence ledger for manual resolution; never substitute a visible URL or
+guess a destination.
+
+## DrawingML Text Boxes
+
+For DrawingML text bodies, retain each paragraph separately. Visible text can
+be split across runs and fields; record contiguous character ranges and direct
+run properties for size, bold, italic, sRGB colour, Latin font, and East Asian
+font. This is text evidence, not an image caption.
+
+Emit the content in textboxes.tex with local LaTeX groups and an explicit
+paragraph boundary after every source shape paragraph. Page or margin
+coordinates are only commented candidates until a same-content PDF comparison
+confirms their placement. Shapes with flow-relative coordinates stay
+evidence-only.
+
 ## Contents
 
+- [Run Decorations](#run-decorations)
+- [Tracked Revisions](#tracked-revisions)
+- [Content Controls And Comments](#content-controls-and-comments)
+- [Footnote And Endnote Anchors](#footnote-and-endnote-anchors)
+- [VML Compatibility Drawings](#vml-compatibility-drawings)
+- [Hyperlink Runs](#hyperlink-runs)
+- [DrawingML Text Boxes](#drawingml-text-boxes)
 - [Evidence Chain](#evidence-chain)
 - [Units](#units)
 - [Font Calibration](#font-calibration)
@@ -17,6 +101,31 @@ Use this reference after inspecting an official DOCX, DOTX, DOTM, DOC, or DOT
 template and before writing `template_spec.json` or `journal-template.cls`.
 
 ## Evidence Chain
+
+## Paragraph And Run Ledger
+
+Before drafting `template_spec.json`, create `word_format_ledger.json` from
+the official OpenXML Word source. The ledger is the working contract between
+Word inspection and LaTeX generation, not a report to skip after extraction.
+
+1. Retain every visible paragraph in document order, including paragraphs in
+   borderless layout tables when they carry manuscript metadata.
+2. Retain every contiguous visible run with character offsets, direct format,
+   effective format, and any safe hyperlink target. A sentence may be split
+   over several Word runs; never flatten those spans before deciding whether a
+   difference is local or role-wide.
+3. Assign each paragraph one or more **role candidates** with evidence IDs.
+   Resolve title, author, affiliation, abstract, keywords, every heading
+   level, body, table caption, figure caption, reference heading/entry, and
+   appendix independently.
+4. Map every resolved role to a specific editable LaTeX owner. Content belongs
+   in `main.tex`; recurring layout rules belong in `journal-template.cls`.
+5. Leave a role as a documented default or mapping gap when Word does not
+   provide reliable evidence. Do not make a generic style or sample wording a
+   journal-wide rule merely to fill the queue.
+
+The ledger's role assignments are proposals. Confirm them against the visible
+Word page and official author instructions before adding a class rule.
 
 For each visible role, resolve Word formatting in this order:
 
@@ -49,6 +158,14 @@ paragraph only after excluding publication dates, received/accepted notices,
 copyright text, correspondence lines, email addresses, abstracts, and
 keywords. A comma alone is not author evidence: Word templates frequently use
 it in date and publication metadata.
+For Chinese author lines, require a leading sequence of plausible two-to-four
+character names separated by Chinese/Latin author separators, optionally with
+affiliation marks. Exclude institution, department, address, postcode, author
+biography, corresponding-author, funding, and typography guidance lines.
+When a real author sample continues with instruction text in the same
+paragraph, split its author-name evidence from the trailing guidance run. The
+guidance may explain a rule, but its local colour or emphasis must not become
+the author formatter.
 
 ## Units
 
@@ -97,6 +214,14 @@ format after the `basedOn` chain, not only direct style properties, for each
 level's font, indentation, and before/after spacing. Use run-in paragraph
 levels only as an editable default when the rendered source does not prove a
 display heading.
+
+Preserve an enabled Word `w:keepNext` on a heading role as a pagination
+constraint. Map it only for that heading level to a bounded class-level
+`\Needspace{2\baselineskip}` guard, which keeps the heading with at least one
+following body line. An explicit `w:val="0"` is disabled evidence, not an
+enabled constraint. Do not add this guard to body paragraphs or to a heading
+without a source `keepNext` value; confirm its final page effect with the same
+content PDF comparison.
 
 For section counters, infer a Roman or alphabetic first-level profile only
 when at least two visible, semantic Word heading roles use that label pattern.
@@ -189,6 +314,15 @@ non-table body role to `\parskip`. Keep template-style candidates and
 table-cell body exemplars at zero until a rendered manuscript sample confirms
 that their spacing belongs to ordinary flow text.
 
+Treat an explicit author instruction that body paragraphs continue without
+blank separation as stronger evidence than a generic Word `Normal` style's
+after-space. Typical wording says that paragraphs are separated only by
+headings, figures, tables, or equations, or directly prohibits blank lines
+between paragraphs. Record the matched instruction in
+`page.body_paragraph_spacing_evidence` and map it to `\parskip=0pt`. Do not
+infer this from prose density or a single short sample paragraph; without the
+explicit statement, retain the normal style evidence and verify it by render.
+
 When a generic named `Normal`, `Body`, or `Body Text` style conflicts with at least two long
 ordinary-flow paragraphs that share a stable effective font or paragraph
 override, preserve the dominant visible body evidence and record the named
@@ -235,12 +369,30 @@ its ratios through `\journaltablerepresentativecolspec` using editable
 `p{<ratio>\journaltablewidth}` columns. It is a representative helper, not a
 required column specification for every table in the journal.
 
+For each selected table, retain each cell's row/column position, fill, merge
+state, and every paragraph's run-format spans. Replay a bounded source table
+when its cell sequence, horizontal spans, continuous vertical merge chains,
+and up to four cell paragraphs are unambiguous. Use `multirow` plus partial
+grid rules so an inner border does not cross a vertical merge. Do not flatten a
+mixed unit or label into a table-wide font. Broken merge chains, longer cell
+content, and truncated evidence stay editable but must be logged as pending
+mapping rather than silently approximated.
+
 For a Word drawing with `width_emu` and `height_emu`, expose
 `\journalfigurerepresentativewidth` as a fraction of its verified local
 container width and `\journalfigurerepresentativeheight` in physical points. Preserve
 inline versus anchored state in the spec. These are representative helpers:
 use them after checking the drawing is a manuscript figure rather than a logo
 or other page furniture.
+
+Select a drawing in three evidence tiers. An external adjacent or nearby figure
+caption authorizes geometry, caption order, and a placement candidate. An
+unlabelled inline drawing may authorize geometry only: it must not establish a
+caption order or non-floating policy. An unlabelled anchored drawing is
+evidence-only because it may be a logo, cover decoration, or page furniture;
+retain its dimensions and offsets for review but do not use them for class-wide
+figure geometry. Record the selection tier and reason in `layout_evidence` and
+write a gap-log entry whenever the selected drawing has no caption relation.
 
 Do not equate a Word drawing's inline versus anchored XML state with the
 journal's universal LaTeX placement rule. Keep that state in the evidence
@@ -365,7 +517,14 @@ number tokens such as `(1)`, and whether Word places the equation inside a
 table cell. A number beside an equation is evidence for numbering, not by
 itself proof of an exact LaTeX right-margin position.
 
-Do not invent a mathematical LaTeX transcription from flattened OMML text.
+Keep a source-visible conversion result for every equation. The bounded
+automatic mapping supports ordinary math runs, fractions, subscripts,
+superscripts, roots, delimiters, functions, common n-ary operators, limits,
+matrices, and equation arrays. Emit converted samples in a separate editable
+equations.tex candidate, not in main.tex. If the source contains a group
+character, border, unknown node, or ambiguous math symbol, retain the source
+structure and a manual-translation entry rather than inventing a formula.
+
 Deliver an editable `journalequation` fixture backed by `amsmath`; use
 `equation*` only when official evidence explicitly establishes unnumbered
 display math. For unverified numbering or placement, preserve a numbered

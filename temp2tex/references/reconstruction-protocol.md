@@ -69,6 +69,9 @@ same content.
 3. Use the template's actual named styles and existing semantic placeholders;
    do not add a made-up layout or infer formatting from the fixture itself.
 4. Populate `main.tex` with equivalent content and matching zone order.
+   Preserve body artwork from a filled Word sample in `assets/` as source
+   evidence, but use a neutral editable figure placeholder in the reusable
+   template package unless the artwork is confirmed page furniture.
 5. Render both documents, compare page frame first, then body density, front
    matter, headings, floats, furniture, and bibliography. Save the fixture
    mapping and comparison report.
@@ -84,6 +87,22 @@ matter; headings; tables/figures; notes, furniture, bibliography, and
 appendix. On a mismatch, repair the first failing layer rather than compensating
 with local `\\vspace` adjustments.
 
+## Run-Level Evidence And Coverage
+
+Inspect visible Word text as contiguous run-format spans, not merely as whole
+paragraphs. A span records its character range, text, direct formatting, and
+effective formatting after style inheritance. This preserves local distinctions
+such as a bold `Abstract` label followed by regular content, mixed title
+emphasis, superscript author markers, and styled correspondence text.
+
+Before rendering, create `source_feature_coverage.json`. For each observable
+feature, mark it `mapped`, `needs_mapping`, or `not_observable`, and name its
+editable LaTeX owner. Treat run typography, page frame, line numbers, page
+furniture, title, abstract, headings, tables, figures, notes, references, and
+appendix as separate features. Resolve priority source-backed gaps before
+adjusting PDF margins, font metrics, or float spacing. A similarly named unused
+Word style does not satisfy coverage for a visible source feature.
+
 The normal package is a general class-based reconstruction, not a one-off
 conversion of Word's sample text. Keep all policies in `journal-template.cls`
 and demonstrate them in `main.tex` through named, editable interfaces.
@@ -92,8 +111,8 @@ and demonstrate them in `main.tex` through named, editable interfaces.
 
 State only what the evidence supports:
 
-- “Implemented from Word section and used-style evidence” is valid.
-- “Visually checked against the populated Word fixture” is valid only after
+- "Implemented from Word section and used-style evidence" is valid.
+- "Visually checked against the populated Word fixture" is valid only after
   the same-content render comparison is saved.
-- “Matches the journal template” requires source evidence for each claimed
+- "Matches the journal template" requires source evidence for each claimed
   zone; otherwise name the default or unverified gap.

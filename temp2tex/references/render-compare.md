@@ -27,13 +27,65 @@ When an official LaTeX template does not exist but an official Word/DOCX templat
 5. Page images: render both PDFs at the same DPI and generate diff images.
 6. Layout profile: extract text boxes, anchor positions, line gaps, same-column baseline steps, font sizes, header/footer occupancy, and image counts.
 
-Anchor every semantic zone with a phrase unique to the shared test manuscript.
+## Graphics-Insensitive Metrics
+
+Do not use manuscript-specific image pixels as a template-fidelity gate. When
+the PDFs contain embedded raster artwork, the format comparison masks only
+the interior of each image rectangle and retains a small perimeter. Evaluate
+the resulting `format_*` metrics for the pass/fail visual gate. The ordinary
+pixel metrics remain diagnostic evidence only.
+
+The mask does **not** excuse a figure mismatch. Confirm image position, outer
+width and height, border/frame, wrapping or float behavior, caption order,
+caption typography, and the downstream page flow. Tables are never image
+content for this purpose: compare their column widths, rules, merged cells,
+cell alignment, notes, and captions directly.
+
+Anchor every applicable semantic zone with a phrase unique to the shared test
+manuscript. Treat the resulting JSON map as a same-content contract, not a
+small collection of convenient search terms. Include separate anchors for
+front matter, body/heading hierarchy, table/caption/note, figure/caption,
+notes, references, and appendix whenever those zones exist.
 Avoid generic labels such as `Table`, `Figure`, or `References`, which can also
 occur in the abstract, running text, or bibliography. The built-in anchor map
 is valid only for the bundled regression fixture. For any other manuscript,
 pass a task-specific JSON map through `--anchors-json` and retain
 `anchor_profile_version` in every report. Do not compare layout scores produced
 by different anchor versions.
+Every declared anchor must occur in both PDFs. If
+`layout_diagnostics.summary.semantic_comparable` is `false`, if
+`same_content_contract_status` is not `passed`, or if
+`shared_anchor_count` differs from `required_anchor_count`, mark the layout
+comparison `not_comparable`.
+`text_contract_status: passed` proves only that the fixture content is shared.
+It does not replace `geometry_contract_status: passed`: every role anchor must
+also have a positioned match before a layout measurement can calibrate the
+class. This distinction is essential when pdfplumber is the geometry fallback.
+
+Use role names, not page numbers, as JSON keys. A minimal bilingual Chinese
+fixture contract can look like this; omit only zones that are genuinely absent:
+
+```json
+{
+  "front_matter.abstract": "摘要：",
+  "front_matter.english_abstract": "Abstract:",
+  "body.heading_1": "1 研究背景",
+  "table.caption": "表 1: 样例数据",
+  "figure.caption": "图 1: 样例流程",
+  "notes.body_footnote": "基金项目：",
+  "references.entry": "[1] Wang",
+  "appendix.heading": "A 附录"
+}
+```
+
+Choose a phrase that is unique within the fixed manuscript and survives PDF
+text extraction. Do not use only a label such as `摘要` or `表`; bind the label
+to its role-specific content or numbering.
+Do not use text-box, baseline, line-gap, margin, float, or calibration hints
+from that pair to change the class. Supply a shared fixture-specific anchor map
+first. `profile_pdf_layout.py` prefers PyMuPDF and falls back to pdfplumber
+when needed; preserve the reported extractor because fallback word grouping is
+diagnostic geometry, not a substitute for a rendered visual review.
 Allow a unique phrase to span a bounded vertical window of wrapped lines or
 same-baseline PDF fragments. Track a horizontal lane, skip interleaved lines
 from another column, and join only overlapping/center-near wrapped lines or
@@ -146,7 +198,13 @@ Large visual differences are expected while placeholder content differs. Focus o
 
 Do not chase pixel-perfect text differences before structural zones are correct.
 
-For ten-case regression, record `pixel_exact`, average normalized diff, and maximum page diff. The default layered visual gate is average normalized diff at or below 0.03 and max page diff at or below 0.08, unless the user explicitly sets a different threshold.
+For regression, record `pixel_exact`, average normalized diff, maximum page diff,
+and the per-page ink-weighted difference plus ink-mask IoU. Whole-page averages
+are dominated by white paper, so they must never be the sole visual gate. The
+comparison tool flags a page when either normalized difference or ink-weighted
+difference exceeds `0.20`; inspect its diff preview and structure before any
+promotion. Calibrate stricter corpus thresholds only from comparable
+same-content cases.
 
 ## Report Expectations
 
@@ -156,7 +214,7 @@ When comparison runs, `render_compare_report.json` should include:
 - renderer and tool availability
 - page count comparison
 - page size comparison
-- image diff score per compared page
+- whole-page and ink-weighted image diff scores plus ink-mask IoU per compared page
 - generated diff image paths
 - layout diagnostics with `layout_penalty`, likely visual causes, anchor page shifts, and horizontal text-box deltas
 - prioritized issues

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import statistics
 import sys
 import unicodedata
@@ -52,7 +53,42 @@ def normalized_match_text(value: str) -> str:
     text = unicodedata.normalize("NFKC", value).casefold()
     for codepoint in (0x00AD, 0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212):
         text = text.replace(chr(codepoint), "-")
-    return " ".join(text.split())
+    text = " ".join(text.split())
+    # pdfplumber can expose CJK glyphs as individually spaced words and can
+    # insert spaces around punctuation. Remove only those extraction artefacts;
+    # preserve ordinary Latin word boundaries for anchor uniqueness.
+    text = re.sub(r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])", "", text)
+    text = re.sub(r"(?<=[\u3400-\u9fff0-9])\s+(?=[:;,，。；、])", "", text)
+    text = re.sub(r"(?<=[:;,，。；、])\s+(?=[\u3400-\u9fff])", "", text)
+    return text
+
+
+def document_text_contract(pdf: Path, anchors: dict[str, list[str]]) -> dict:
+    """Check fixture content independently of positioned-line extraction.
+
+    pdfplumber's fallback geometry can split labels and numbers into separate
+    word lanes. Keep that limitation visible: a plain-text pass establishes
+    structural content only; it never substitutes for the positioned anchor
+    contract used by layout calibration.
+    """
+    extractor = "pypdf"
+    try:
+        from pypdf import PdfReader  # type: ignore
+        text = "\n".join(page.extract_text() or "" for page in PdfReader(str(pdf)).pages)
+    except Exception as pypdf_error:
+        extractor = "pdfplumber_fallback"
+        try:
+            import pdfplumber  # type: ignore
+            with pdfplumber.open(str(pdf)) as document:
+                text = "\n".join(page.extract_text() or "" for page in document.pages)
+        except Exception as exc:
+            return {"available": False, "extractor": extractor, "error": f"pypdf={pypdf_error}; fallback={exc}", "anchors": {}}
+    normalized = normalized_match_text(text)
+    found = {}
+    for name, needles in anchors.items():
+        matched = next((needle for needle in needles if normalized_match_text(needle) in normalized), None)
+        found[name] = {"present": matched is not None, "matched_phrase": matched}
+    return {"available": True, "extractor": extractor, "anchors": found}
 
 
 def horizontal_gap(first: list[float], second: list[float]) -> float:
@@ -178,11 +214,151 @@ def line_from_spans(spans: list[dict], bbox: list[float]) -> dict:
     }
 
 
+def profile_page(index: int, width: float, height: float, lines: list[dict], image_count: int) -> dict:
+    """Produce backend-neutral page metrics from positioned text lines."""
+    lines.sort(key=lambda item: (item["bbox"][1], item["bbox"][0]))
+    text_bbox = bbox_union([line["bbox"] for line in lines])
+    body_lines = [
+        line for line in lines
+        if line["bbox"][1] >= height * 0.12 and line["bbox"][3] <= height * 0.88
+    ]
+    gaps = []
+    for first, second in zip(body_lines, body_lines[1:]):
+        gap = float(second["bbox"][1]) - float(first["bbox"][3])
+        if -2 <= gap <= 60:
+            gaps.append(gap)
+    sizes = [float(line["font_size"]) for line in body_lines if line.get("font_size")]
+    body_baseline_steps = baseline_steps(body_lines)
+    text = "\n".join(line["text"] for line in lines)
+    top_band = [line for line in lines if line["bbox"][1] <= height * 0.12]
+    bottom_band = [line for line in lines if line["bbox"][3] >= height * 0.88]
+    anchors = {}
+    for name, needles in ANCHORS.items():
+        hits = semantic_anchor_hits(lines, needles)
+        anchors[name] = {
+            "present": bool(hits),
+            "first_bbox": hits[0]["bbox"] if hits else None,
+            "hit_count": len(hits),
+            "sample_text": hits[0]["text"] if hits else None,
+            "matched_line_count": hits[0]["line_count"] if hits else None,
+        }
+    return {
+        "index": index,
+        "width_pt": width,
+        "height_pt": height,
+        "text_bbox": text_bbox,
+        "body_text_bbox": bbox_union([line["bbox"] for line in body_lines]),
+        "top_margin_pt": text_bbox[1] if text_bbox else None,
+        "bottom_margin_pt": height - text_bbox[3] if text_bbox else None,
+        "left_margin_pt": text_bbox[0] if text_bbox else None,
+        "right_margin_pt": width - text_bbox[2] if text_bbox else None,
+        "line_count": len(lines),
+        "word_count": text_words(text),
+        "body_line_count": len(body_lines),
+        "body_word_count": sum(line["word_count"] for line in body_lines),
+        "median_line_gap_pt": median(gaps),
+        "median_baseline_step_pt": median(body_baseline_steps),
+        "baseline_step_sample_count": len(body_baseline_steps),
+        "median_font_size_pt": median(sizes),
+        "header_line_count": len(top_band),
+        "footer_line_count": len(bottom_band),
+        "image_count": image_count,
+        "anchors": anchors,
+    }
+
+
+def extract_profile_pdfplumber(pdf: Path, max_pages: int, pymupdf_error: str) -> dict:
+    """Fallback profiler for environments without PyMuPDF.
+
+    pdfplumber exposes positioned words rather than native text spans, so font
+    names and line grouping are less exact. It still provides the geometry
+    needed to diagnose page-frame, body-density, anchor, and image-box issues.
+    """
+    try:
+        import pdfplumber  # type: ignore
+    except Exception as exc:
+        return {
+            "available": False,
+            "error": f"PyMuPDF is unavailable: {pymupdf_error}; pdfplumber is unavailable: {exc}",
+            "pages": [],
+        }
+    pages = []
+    try:
+        with pdfplumber.open(str(pdf)) as doc:
+            for page_index, page in enumerate(doc.pages[:max_pages], 1):
+                raw_words = page.extract_words(
+                    use_text_flow=True,
+                    keep_blank_chars=False,
+                    extra_attrs=["fontname", "size"],
+                ) or []
+                # Font-size changes (heading numbers, CJK glyphs, superscripts,
+                # caption labels) often give one visual line slightly different
+                # `top` values. Cluster by vertical midpoint/overlap first, then
+                # order the full visual line left-to-right.
+                rows: list[list[dict]] = []
+                for word in sorted(raw_words, key=lambda item: float(item.get("top") or 0.0)):
+                    text = str(word.get("text") or "").strip()
+                    if not text:
+                        continue
+                    top = float(word.get("top") or 0.0)
+                    bottom = float(word.get("bottom") or top)
+                    midpoint = (top + bottom) / 2
+                    placed = False
+                    for row in reversed(rows):
+                        row_tops = [float(item.get("top") or 0.0) for item in row]
+                        row_bottoms = [float(item.get("bottom") or 0.0) for item in row]
+                        row_midpoint = (statistics.median(row_tops) + statistics.median(row_bottoms)) / 2
+                        row_height = max(statistics.median(row_bottoms) - statistics.median(row_tops), 1.0)
+                        word_height = max(bottom - top, 1.0)
+                        overlap = max(0.0, min(bottom, max(row_bottoms)) - max(top, min(row_tops)))
+                        if abs(midpoint - row_midpoint) <= max(2.0, min(row_height, word_height) * 0.55) or overlap >= min(row_height, word_height) * 0.55:
+                            row.append(word)
+                            placed = True
+                            break
+                    if not placed:
+                        rows.append([word])
+                lines = []
+                for words in rows:
+                    words.sort(key=lambda item: float(item.get("x0") or 0.0))
+                    bbox = [
+                        min(float(item.get("x0") or 0.0) for item in words),
+                        min(float(item.get("top") or 0.0) for item in words),
+                        max(float(item.get("x1") or 0.0) for item in words),
+                        max(float(item.get("bottom") or 0.0) for item in words),
+                    ]
+                    sizes = [float(item.get("size")) for item in words if item.get("size")]
+                    lines.append({
+                        "text": " ".join(str(item.get("text") or "") for item in words).strip(),
+                        "bbox": bbox,
+                        "font_size": median(sizes),
+                        "font": str(words[0].get("fontname") or "") or None,
+                        "word_count": text_words(" ".join(str(item.get("text") or "") for item in words)),
+                    })
+                pages.append(profile_page(page_index, float(page.width), float(page.height), lines, len(page.images or [])))
+            total_page_count = len(doc.pages)
+    except Exception as exc:
+        return {
+            "available": False,
+            "error": f"PyMuPDF is unavailable: {pymupdf_error}; pdfplumber extraction failed: {exc}",
+            "pages": [],
+        }
+    return {
+        "available": True,
+        "anchor_profile_version": ANCHOR_PROFILE_VERSION,
+        "pdf": str(pdf),
+        "extractor": "pdfplumber_fallback",
+        "pymupdf_error": pymupdf_error,
+        "total_page_count": total_page_count,
+        "profiled_page_count": len(pages),
+        "pages": pages,
+    }
+
+
 def extract_profile(pdf: Path, max_pages: int) -> dict:
     try:
         import fitz  # type: ignore
     except Exception as exc:
-        return {"available": False, "error": f"PyMuPDF is unavailable: {exc}", "pages": []}
+        return extract_profile_pdfplumber(pdf, max_pages, str(exc))
 
     pages = []
     total_page_count = 0
@@ -199,59 +375,12 @@ def extract_profile(pdf: Path, max_pages: int) -> dict:
                     line = line_from_spans(raw_line.get("spans", []), raw_line.get("bbox", [0, 0, 0, 0]))
                     if line["text"]:
                         lines.append(line)
-            lines.sort(key=lambda item: (item["bbox"][1], item["bbox"][0]))
-            text_bbox = bbox_union([line["bbox"] for line in lines])
-            body_lines = [
-                line for line in lines
-                if line["bbox"][1] >= height * 0.12 and line["bbox"][3] <= height * 0.88
-            ]
-            gaps = []
-            for first, second in zip(body_lines, body_lines[1:]):
-                gap = float(second["bbox"][1]) - float(first["bbox"][3])
-                if -2 <= gap <= 60:
-                    gaps.append(gap)
-            sizes = [float(line["font_size"]) for line in body_lines if line.get("font_size")]
-            body_baseline_steps = baseline_steps(body_lines)
-            text = "\n".join(line["text"] for line in lines)
-            top_band = [line for line in lines if line["bbox"][1] <= height * 0.12]
-            bottom_band = [line for line in lines if line["bbox"][3] >= height * 0.88]
-            anchors = {}
-            for name, needles in ANCHORS.items():
-                hits = semantic_anchor_hits(lines, needles)
-                anchors[name] = {
-                    "present": bool(hits),
-                    "first_bbox": hits[0]["bbox"] if hits else None,
-                    "hit_count": len(hits),
-                    "sample_text": hits[0]["text"] if hits else None,
-                    "matched_line_count": hits[0]["line_count"] if hits else None,
-                }
-            pages.append({
-                "index": page_index,
-                "width_pt": width,
-                "height_pt": height,
-                "text_bbox": text_bbox,
-                "body_text_bbox": bbox_union([line["bbox"] for line in body_lines]),
-                "top_margin_pt": text_bbox[1] if text_bbox else None,
-                "bottom_margin_pt": height - text_bbox[3] if text_bbox else None,
-                "left_margin_pt": text_bbox[0] if text_bbox else None,
-                "right_margin_pt": width - text_bbox[2] if text_bbox else None,
-                "line_count": len(lines),
-                "word_count": text_words(text),
-                "body_line_count": len(body_lines),
-                "body_word_count": sum(line["word_count"] for line in body_lines),
-                "median_line_gap_pt": median(gaps),
-                "median_baseline_step_pt": median(body_baseline_steps),
-                "baseline_step_sample_count": len(body_baseline_steps),
-                "median_font_size_pt": median(sizes),
-                "header_line_count": len(top_band),
-                "footer_line_count": len(bottom_band),
-                "image_count": len(page.get_images(full=True)),
-                "anchors": anchors,
-            })
+            pages.append(profile_page(page_index, width, height, lines, len(page.get_images(full=True))))
     return {
         "available": True,
         "anchor_profile_version": ANCHOR_PROFILE_VERSION,
         "pdf": str(pdf),
+        "extractor": "pymupdf",
         "total_page_count": total_page_count,
         "profiled_page_count": len(pages),
         "pages": pages,
@@ -340,7 +469,12 @@ def finite_abs(value: object) -> float:
     return abs(number) if math.isfinite(number) else 0.0
 
 
-def summarize(comparisons: list[dict], document_anchor_deltas: dict | None = None) -> dict:
+def summarize(
+    comparisons: list[dict],
+    document_anchor_deltas: dict | None = None,
+    reference_text_contract: dict | None = None,
+    generated_text_contract: dict | None = None,
+) -> dict:
     anchor_max: dict[str, float] = {}
     missing_anchors: list[str] = []
     anchor_page_shifts: dict[str, int] = {}
@@ -350,8 +484,32 @@ def summarize(comparisons: list[dict], document_anchor_deltas: dict | None = Non
             anchor_max[name] = max(anchor_max.get(name, 0.0), finite_abs(delta.get("top")))
             if info.get("page_delta"):
                 anchor_page_shifts[name] = abs(int(info["page_delta"]))
-        elif info.get("reference_present") != info.get("generated_present"):
+        # A same-content contract is not satisfied when either side lacks a
+        # required phrase. Treat a phrase missing from both PDFs as an invalid
+        # contract entry too, rather than silently ignoring it.
+        elif not (info.get("reference_present") and info.get("generated_present")):
             missing_anchors.append(name)
+    shared_anchor_count = len(anchor_max)
+    required_anchor_count = len(document_anchor_deltas or {})
+    text_contract = {}
+    for name in (document_anchor_deltas or {}):
+        ref = (reference_text_contract or {}).get("anchors", {}).get(name, {})
+        gen = (generated_text_contract or {}).get("anchors", {}).get(name, {})
+        text_contract[name] = {
+            "reference_present": bool(ref.get("present")),
+            "generated_present": bool(gen.get("present")),
+        }
+    missing_text_contract_anchors = [
+        name for name, item in text_contract.items()
+        if not (item["reference_present"] and item["generated_present"])
+    ]
+    text_contract_passed = bool(text_contract) and not missing_text_contract_anchors
+    # Geometry from unrelated or partly divergent fixtures is not a calibration
+    # signal. An anchor map is a same-content contract: every declared phrase
+    # must occur in both PDFs before interpreting text extents, density, or
+    # float flow. A partial hit is diagnostic evidence, never a tuning gate.
+    geometry_contract_passed = required_anchor_count > 0 and shared_anchor_count == required_anchor_count
+    semantic_comparable = text_contract_passed and geometry_contract_passed
     bbox_max = max((finite_abs((item.get("text_bbox_delta") or {}).get("max_abs_pt")) for item in comparisons), default=0.0)
     line_gap_max = max((finite_abs(item.get("median_line_gap_delta_pt")) for item in comparisons), default=0.0)
     baseline_step_max = max((finite_abs(item.get("median_baseline_step_delta_pt")) for item in comparisons), default=0.0)
@@ -425,7 +583,11 @@ def summarize(comparisons: list[dict], document_anchor_deltas: dict | None = Non
         for item in comparisons if item.get("median_baseline_step_delta_pt") is not None
     ])
     calibration_hints = []
-    if pagination_or_flow >= 0.75:
+    if not semantic_comparable:
+        calibration_hints.append(
+            "The same-content anchor contract is incomplete. Do not calibrate margins, body density, captions, or float placement; repair the fixture or its role-level anchor map first."
+        )
+    elif pagination_or_flow >= 0.75:
         calibration_hints.append(
             "Later anchors drift across pages; repair front-matter flow, column transition, or float placement before proposing page-margin calibration."
         )
@@ -434,23 +596,30 @@ def summarize(comparisons: list[dict], document_anchor_deltas: dict | None = Non
         calibration_hints.append(
             f"Generated body text box is about {abs(width_delta):.1f}pt {direction}; inspect page margins and role-specific left/right indents before tuning local spacing."
         )
-    if font_delta is not None and abs(font_delta) > 0.5:
+    if semantic_comparable and font_delta is not None and abs(font_delta) > 0.5:
         direction = "larger" if font_delta > 0 else "smaller"
         calibration_hints.append(
             f"Generated median body font is about {abs(font_delta):.1f}pt {direction}; verify font family metrics and source body size together."
         )
-    if line_delta is not None and abs(line_delta) > 1.0:
+    if semantic_comparable and line_delta is not None and abs(line_delta) > 1.0:
         direction = "looser" if line_delta > 0 else "tighter"
         calibration_hints.append(
             f"Generated median body line gap is about {abs(line_delta):.1f}pt {direction}; calibrate line spacing only after the body box is correct."
         )
-    if baseline_delta is not None and abs(baseline_delta) > 0.75:
+    if semantic_comparable and baseline_delta is not None and abs(baseline_delta) > 0.75:
         direction = "larger" if baseline_delta > 0 else "smaller"
         calibration_hints.append(
             f"Generated median same-lane baseline step is about {abs(baseline_delta):.1f}pt {direction}; consider a bounded body-density render probe only when page count, body width, and anchor pages are stable."
         )
     return {
-        "layout_penalty": round(penalty, 6),
+        "layout_penalty": round(penalty, 6) if semantic_comparable else None,
+        "semantic_comparable": semantic_comparable,
+        "shared_anchor_count": shared_anchor_count,
+        "required_anchor_count": required_anchor_count,
+        "same_content_contract_status": "passed" if semantic_comparable else "failed",
+        "text_contract_status": "passed" if text_contract_passed else "failed",
+        "geometry_contract_status": "passed" if geometry_contract_passed else "failed",
+        "missing_text_contract_anchors": missing_text_contract_anchors,
         "max_text_bbox_delta_pt": round(bbox_max, 3),
         "max_line_gap_delta_pt": round(line_gap_max, 3),
         "max_baseline_step_delta_pt": round(baseline_step_max, 3),
@@ -465,7 +634,7 @@ def summarize(comparisons: list[dict], document_anchor_deltas: dict | None = Non
         "anchor_page_shifts": anchor_page_shifts,
         "missing_or_asymmetric_anchors": missing_anchors,
         "cause_scores": {key: round(value, 6) for key, value in sorted(cause_scores.items())},
-        "top_causes": top_causes or ["minor_visual_difference"],
+        "top_causes": (top_causes or ["minor_visual_difference"]) if semantic_comparable else ["same_content_anchor_evidence_missing"],
         "calibration_hints": calibration_hints,
     }
 
@@ -495,6 +664,8 @@ def main() -> int:
 
     ref_profile = extract_profile(ref_pdf, args.max_pages)
     gen_profile = extract_profile(gen_pdf, args.max_pages)
+    reference_text_contract = document_text_contract(ref_pdf, ANCHORS)
+    generated_text_contract = document_text_contract(gen_pdf, ANCHORS)
     comparisons = []
     if ref_profile.get("available") and gen_profile.get("available"):
         for ref_page, gen_page in zip(ref_profile.get("pages", []), gen_profile.get("pages", [])):
@@ -513,7 +684,12 @@ def main() -> int:
         "available": bool(ref_profile.get("available") and gen_profile.get("available")),
         "comparisons": comparisons,
         "document_anchor_deltas": document_anchor_deltas,
-        "summary": summarize(comparisons, document_anchor_deltas) if comparisons else {
+        "same_content_text_contract": {
+            "reference": reference_text_contract,
+            "generated": generated_text_contract,
+            "rule": "Text-contract presence is structural evidence only; every anchor also needs a positioned match before layout calibration.",
+        },
+        "summary": summarize(comparisons, document_anchor_deltas, reference_text_contract, generated_text_contract) if comparisons else {
             "layout_penalty": None,
             "top_causes": ["layout_profile_unavailable"],
         },

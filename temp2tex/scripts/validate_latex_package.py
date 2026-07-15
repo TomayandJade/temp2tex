@@ -260,6 +260,25 @@ def main() -> int:
         if not (package / name).is_dir():
             errors.append(f"Missing required directory: {name}/")
 
+    inventory_path = package / "source_inventory.json"
+    coverage_path = package / "source_feature_coverage.json"
+    if inventory_path.is_file() and not coverage_path.is_file():
+        errors.append("source_inventory.json is present but source_feature_coverage.json is missing")
+    if coverage_path.is_file():
+        try:
+            coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"source_feature_coverage.json is not valid UTF-8 JSON: {exc}")
+        else:
+            summary = coverage.get("summary") if isinstance(coverage, dict) else None
+            features = coverage.get("features") if isinstance(coverage, dict) else None
+            if coverage.get("schema_version") not in {1, 2}:
+                errors.append("source_feature_coverage.json schema_version must be 1 or 2")
+            if not isinstance(summary, dict) or not isinstance(features, list):
+                errors.append("source_feature_coverage.json must contain summary and features")
+            elif not any(item.get("feature") == "run_level_format_spans" for item in features if isinstance(item, dict)):
+                errors.append("source_feature_coverage.json must audit run_level_format_spans")
+
     spec: dict = {}
     spec_path = package / "template_spec.json"
     if spec_path.exists():

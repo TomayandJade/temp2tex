@@ -88,9 +88,49 @@ def render_pdf(pdf: Path, outdir: Path, prefix: str, dpi: int, max_pages: int) -
     }
 
 
-def image_diff(ref: Path, gen: Path, diff: Path) -> dict:
+def pdf_graphic_regions(path: Path, dpi: int, max_pages: int) -> dict:
+    """Find embedded raster artwork rectangles for content-insensitive comparison.
+
+    The rectangles are evidence for image geometry. Their interiors are masked
+    only in the format metric: figure borders, caption placement, page flow,
+    and every non-image region remain comparable.
+    """
     try:
-        from PIL import Image, ImageChops, ImageStat  # type: ignore
+        import pdfplumber  # type: ignore
+    except Exception as exc:
+        return {"available": False, "error": f"pdfplumber unavailable: {exc}", "pages": []}
+    pages = []
+    try:
+        with pdfplumber.open(str(path)) as pdf:
+            for page_index, page in enumerate(pdf.pages[:max_pages], 1):
+                scale = dpi / 72.0
+                rectangles = []
+                for image in page.images:
+                    try:
+                        x0 = max(0.0, float(image["x0"]) * scale)
+                        x1 = min(float(page.width) * scale, float(image["x1"]) * scale)
+                        y0 = max(0.0, float(image["top"]) * scale)
+                        y1 = min(float(page.height) * scale, float(image["bottom"]) * scale)
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if x1 - x0 >= 12 and y1 - y0 >= 12:
+                        rectangles.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+                pages.append({"page": page_index, "regions": rectangles})
+    except Exception as exc:
+        return {"available": False, "error": str(exc), "pages": []}
+    return {"available": True, "pages": pages}
+
+
+def page_graphic_regions(report: dict, page: int) -> list[dict]:
+    for record in report.get("pages", []):
+        if record.get("page") == page:
+            return record.get("regions", [])
+    return []
+
+
+def image_diff(ref: Path, gen: Path, diff: Path, ignored_graphics: list[dict] | None = None) -> dict:
+    try:
+        from PIL import Image, ImageChops, ImageDraw, ImageOps, ImageStat  # type: ignore
     except Exception as exc:
         return {"available": False, "error": f"Install Pillow for pixel diff: {exc}"}
 
@@ -105,11 +145,81 @@ def image_diff(ref: Path, gen: Path, diff: Path) -> dict:
         stat = ImageStat.Stat(delta)
         mean = sum(stat.mean) / len(stat.mean)
         score = mean / 255.0
+        # Whole-page averages are dominated by white paper. Measure the delta
+        # again only where either PDF renders visible ink so sparse layouts do
+        # not receive an artificially small difference score.
+        threshold = 245
+        ref_ink = ImageOps.grayscale(canvas_a).point(lambda value: 255 if value < threshold else 0)
+        gen_ink = ImageOps.grayscale(canvas_b).point(lambda value: 255 if value < threshold else 0)
+        ink_union = ImageChops.lighter(ref_ink, gen_ink)
+        ink_intersection = ImageChops.darker(ref_ink, gen_ink)
+        union_pixels = ink_union.histogram()[255]
+        intersection_pixels = ink_intersection.histogram()[255]
+        reference_pixels = ref_ink.histogram()[255]
+        generated_pixels = gen_ink.histogram()[255]
+        grayscale_delta = ImageOps.grayscale(delta)
+        masked_delta = ImageChops.multiply(grayscale_delta, ink_union)
+        masked_sum = ImageStat.Stat(masked_delta).sum[0]
+        ink_weighted_diff = masked_sum / (union_pixels * 255.0) if union_pixels else 0.0
         delta.save(diff)
-    return {"available": True, "mean_abs_diff": mean, "normalized_diff": score, "diff_image": str(diff)}
+        comparison_mask = Image.new("L", (width, height), "white")
+        mask_draw = ImageDraw.Draw(comparison_mask)
+        # Preserve a small perimeter so geometry differences still contribute.
+        border_px = 4
+        masked_regions = 0
+        for region in ignored_graphics or []:
+            try:
+                x0 = max(0, min(width, round(float(region["x0"]) + border_px)))
+                y0 = max(0, min(height, round(float(region["y0"]) + border_px)))
+                x1 = max(0, min(width, round(float(region["x1"]) - border_px)))
+                y1 = max(0, min(height, round(float(region["y1"]) - border_px)))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if x1 > x0 and y1 > y0:
+                mask_draw.rectangle((x0, y0, x1, y1), fill=0)
+                masked_regions += 1
+        mask_histogram = comparison_mask.histogram()
+        compared_pixels = mask_histogram[255]
+        format_delta = ImageChops.multiply(grayscale_delta, comparison_mask)
+        format_delta.save(diff.with_name(diff.stem + "-format" + diff.suffix))
+        format_ref_ink = ImageChops.multiply(ref_ink, comparison_mask)
+        format_gen_ink = ImageChops.multiply(gen_ink, comparison_mask)
+        format_union = ImageChops.lighter(format_ref_ink, format_gen_ink)
+        format_intersection = ImageChops.darker(format_ref_ink, format_gen_ink)
+        format_union_pixels = format_union.histogram()[255]
+        format_intersection_pixels = format_intersection.histogram()[255]
+        format_delta_sum = ImageStat.Stat(format_delta).sum[0]
+        format_ink_delta = ImageChops.multiply(format_delta, format_union)
+        format_ink_sum = ImageStat.Stat(format_ink_delta).sum[0]
+        format_ink_weighted_diff = format_ink_sum / (format_union_pixels * 255.0) if format_union_pixels else 0.0
+        format_normalized_diff = format_delta_sum / (compared_pixels * 255.0) if compared_pixels else 0.0
+    total_pixels = width * height
+    return {
+        "available": True,
+        "mean_abs_diff": mean,
+        "normalized_diff": score,
+        "ink_weighted_diff": ink_weighted_diff,
+        "reference_ink_ratio": reference_pixels / total_pixels,
+        "generated_ink_ratio": generated_pixels / total_pixels,
+        "ink_union_ratio": union_pixels / total_pixels,
+        "ink_iou": intersection_pixels / union_pixels if union_pixels else 1.0,
+        "diff_image": str(diff),
+        "format_normalized_diff": format_normalized_diff,
+        "format_ink_weighted_diff": format_ink_weighted_diff,
+        "format_ink_iou": format_intersection_pixels / format_union_pixels if format_union_pixels else 1.0,
+        "format_diff_image": str(diff.with_name(diff.stem + "-format" + diff.suffix)),
+        "ignored_graphic_interior_regions": masked_regions,
+        "ignored_graphic_interior_pixels": total_pixels - compared_pixels,
+    }
 
 
-def layout_diagnostics(reference_pdf: Path, generated_pdf: Path, outdir: Path, max_pages: int) -> dict:
+def layout_diagnostics(
+    reference_pdf: Path,
+    generated_pdf: Path,
+    outdir: Path,
+    max_pages: int,
+    anchors_json: Path | None = None,
+) -> dict:
     layout_dir = outdir / "layout_profile"
     cmd = [
         sys.executable,
@@ -121,6 +231,8 @@ def layout_diagnostics(reference_pdf: Path, generated_pdf: Path, outdir: Path, m
         "--max-pages",
         str(max_pages),
     ]
+    if anchors_json:
+        cmd.extend(["--anchors-json", str(anchors_json)])
     try:
         proc = subprocess.run(cmd, text=True, capture_output=True, timeout=90)
     except Exception as exc:
@@ -149,6 +261,7 @@ def main() -> int:
     parser.add_argument("--outdir", default="render-compare")
     parser.add_argument("--dpi", type=int, default=144)
     parser.add_argument("--max-pages", type=int, default=8)
+    parser.add_argument("--anchors-json", help="Optional unique same-content anchor map forwarded to profile_pdf_layout.py")
     args = parser.parse_args()
 
     ref_pdf = Path(args.reference_pdf).expanduser().resolve()
@@ -164,15 +277,20 @@ def main() -> int:
     gen_pages = pdf_pages(gen_pdf)
     rendered_ref, ref_render_report = render_pdf(ref_pdf, pages_dir, "reference", args.dpi, args.max_pages)
     rendered_gen, gen_render_report = render_pdf(gen_pdf, pages_dir, "generated", args.dpi, args.max_pages)
+    reference_graphics = pdf_graphic_regions(ref_pdf, args.dpi, args.max_pages)
+    generated_graphics = pdf_graphic_regions(gen_pdf, args.dpi, args.max_pages)
 
     comparisons = []
     for idx, (ref_img, gen_img) in enumerate(zip(rendered_ref, rendered_gen), 1):
         diff_dir.mkdir(parents=True, exist_ok=True)
+        ignored_graphics = page_graphic_regions(reference_graphics, idx) + page_graphic_regions(generated_graphics, idx)
         comparisons.append({
             "page": idx,
             "reference_image": str(ref_img),
             "generated_image": str(gen_img),
-            "diff": image_diff(ref_img, gen_img, diff_dir / f"page-{idx:03d}-diff.png"),
+            "reference_graphic_regions": page_graphic_regions(reference_graphics, idx),
+            "generated_graphic_regions": page_graphic_regions(generated_graphics, idx),
+            "diff": image_diff(ref_img, gen_img, diff_dir / f"page-{idx:03d}-diff.png", ignored_graphics),
         })
 
     issues = []
@@ -181,10 +299,32 @@ def main() -> int:
     if not rendered_ref or not rendered_gen:
         issues.append("PDF image rendering did not run; ensure pdftoppm is available.")
     if comparisons:
-        high = [c for c in comparisons if c["diff"].get("normalized_diff", 0) > 0.20]
+        high = [
+            c for c in comparisons
+            if c["diff"].get("format_normalized_diff", c["diff"].get("normalized_diff", 0)) > 0.20
+            or c["diff"].get("format_ink_weighted_diff", c["diff"].get("ink_weighted_diff", 0)) > 0.20
+        ]
         if high:
             issues.append(f"{len(high)} compared page(s) have high visual difference; inspect diff_previews.")
-    layout_report = layout_diagnostics(ref_pdf, gen_pdf, outdir, args.max_pages)
+    anchors_json = Path(args.anchors_json).expanduser().resolve() if args.anchors_json else None
+    if anchors_json and not anchors_json.is_file():
+        print(f"--anchors-json does not exist: {anchors_json}", file=sys.stderr)
+        return 2
+    layout_report = layout_diagnostics(ref_pdf, gen_pdf, outdir, args.max_pages, anchors_json)
+    layout_summary = layout_report.get("summary") if isinstance(layout_report, dict) else None
+    semantic_comparable = layout_summary.get("semantic_comparable") if isinstance(layout_summary, dict) else None
+    layout_comparability = {
+        "status": "not_comparable" if semantic_comparable is False else "comparable" if semantic_comparable is True else "unavailable",
+        "semantic_comparable": semantic_comparable,
+        "shared_anchor_count": layout_summary.get("shared_anchor_count") if isinstance(layout_summary, dict) else None,
+        "required_anchor_count": layout_summary.get("required_anchor_count") if isinstance(layout_summary, dict) else None,
+        "same_content_contract_status": layout_summary.get("same_content_contract_status") if isinstance(layout_summary, dict) else None,
+        "text_contract_status": layout_summary.get("text_contract_status") if isinstance(layout_summary, dict) else None,
+        "geometry_contract_status": layout_summary.get("geometry_contract_status") if isinstance(layout_summary, dict) else None,
+        "rule": "Layout calibration requires every declared unique same-content anchor to occur in both PDFs.",
+    }
+    if layout_comparability["status"] == "not_comparable":
+        issues.append("The same-content anchor contract is incomplete; do not use this PDF pair for class calibration.")
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -193,8 +333,15 @@ def main() -> int:
         "reference_pages": ref_pages,
         "generated_pages": gen_pages,
         "rendering": {"reference": ref_render_report, "generated": gen_render_report},
+        "graphic_content_policy": {
+            "mode": "mask_embedded_graphic_interiors_for_format_metric",
+            "rule": "Ignore raster image interiors only; retain image borders, geometry, captions, page flow, tables, and text in the format comparison.",
+            "reference": reference_graphics,
+            "generated": generated_graphics,
+        },
         "comparisons": comparisons,
         "layout_diagnostics": layout_report,
+        "layout_comparability": layout_comparability,
         "issues": issues,
     }
     outdir.mkdir(parents=True, exist_ok=True)

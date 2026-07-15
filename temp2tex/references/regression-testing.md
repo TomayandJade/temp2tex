@@ -8,11 +8,11 @@
 - [Acceptance Order](#acceptance-order)
 - [Standard Command](#standard-command)
 - [Variant Search](#variant-search)
-- [Thirty-Case Training Loop](#thirty-case-training-loop)
+- [Admitted-Corpus Training Loop](#admitted-corpus-training-loop)
 
 Use this reference when a task asks whether Temp2TeX matches official journal template evidence, or when the user is improving the skill from the fixed corpus. This is not the ordinary single-journal conversion workflow.
 
-Do not run the 30-case regression suite for a normal user request that only asks for a LaTeX package from a Word/PDF/web template. In that case, deliver the package and optional verification artifacts described in `SKILL.md`.
+Do not run the full regression suite for a normal user request that only asks for a LaTeX package from a Word/PDF/web template. In that case, deliver the package and optional verification artifacts described in `SKILL.md`.
 
 ## Goal
 
@@ -45,20 +45,33 @@ When official LaTeX does not exist, cannot be obtained, or cannot produce a loca
 reference PDF, but official Word/DOCX exists, use a fallback gate:
 
 1. Create a working copy with `scripts/normalize_word_stress.py`, using the same
-   fixture as the LaTeX test and preserving the Word template's selected role
-   styles. The original download is evidence and must remain unchanged.
+   fixture language as the LaTeX test (`--fixture-language zh` for Chinese and
+   `--fixture-language mixed` for bilingual templates) while preserving the Word
+   template's selected role styles. When the generated package uses the standard
+   editable fixture, add `--fixture-profile latex-default` so the two PDFs use the
+   same front matter and content order. The original download is evidence and must
+   remain unchanged.
 2. Render that normalized Word copy to PDF with the best available renderer.
 3. Compile the Temp2TeX-generated LaTeX package to PDF.
 4. Compare the Word-rendered PDF against the generated PDF.
 5. Record the mode as `word_render_fallback` so it is not confused with an official-LaTeX strict pass.
 
-A blank template PDF versus a populated LaTeX test is `not_comparable`.
+A blank template PDF versus a populated LaTeX test is `not_comparable`. The
+same applies to an instruction-only Word template when the normalized working
+copy would carry formatting guidance, placeholder text, or example reference
+rules into the test manuscript rather than a complete role-matched fixture.
 
 The normalized Word reference must preserve the selected role's own style. A
 direct paragraph/run format may be copied only when its source paragraph has
 the same Word style ID as the target role; otherwise record the mismatch and
 retain the target style. This prevents a long abstract, instruction, or
 reference paragraph from contaminating the canonical body manuscript.
+
+For directly formatted Chinese templates, numbered paragraphs before the first
+visible Chinese or English abstract are front-matter candidates. Do not use
+them as body-heading exemplars merely because they begin with `1.` or `2.`:
+they are commonly numbered author affiliations. Use a visible post-abstract
+manuscript heading, or retain the heading mapping as unresolved evidence.
 
 It must also preserve the source section semantics that affect layout. Keep an
 explicit continuous one-column front-matter section followed by a two-column
@@ -99,8 +112,8 @@ Run admission preflight before adding a candidate to the active corpus:
 
 ```powershell
 python "$skillRoot\scripts\preflight_corpus.py" `
-  --manifest "$corpusRoot\manifest_30.json" `
-  --outdir "$corpusRoot\preflight-30case"
+  --manifest "$corpusRoot\manifest-60.json" `
+  --outdir "$corpusRoot\preflight-60case"
 ```
 
 A candidate is admitted only when its official source metadata exists, the downloaded Word artifact has a valid DOC/DOCX/DOT/DOTX/RTF payload, a SHA-256 hash is recorded, and the Word source renders to PDF. Missing official LaTeX selects `word_render_fallback`; it does not reject the case. Challenge pages, HTML saved as a document, inaccessible redirects, and non-renderable Word files remain outside the active corpus until fixed or replaced.
@@ -124,13 +137,13 @@ Record `pixel_exact`, `layout_penalty`, and likely layout causes separately. Pix
 
 ```powershell
 python "$skillRoot\scripts\run_regression.py" `
-  --manifest "$corpusRoot\manifest.json" `
+  --manifest "$corpusRoot\manifest-60.json" `
   --outdir "$corpusRoot\iteration-1" `
   --variant-search `
   --review
 ```
 
-Run failing cases again with `--cases <case_id>` after improving the skill, then run the representative set and the configured 30-case manifest before declaring the 30-case regression clean.
+Run failing cases again with `--cases <case_id>` after improving the skill, then run the representative set and the configured canonical 60-case manifest before declaring the full regression clean.
 
 If a full run is split because of a shell timeout, rerun only the missing case
 IDs with the same `--outdir`. The runner rebuilds `benchmark.json` and
@@ -229,9 +242,12 @@ evidence because it may provide the printable rules.
 
 When a generic Word body style conflicts with several visible flow paragraphs,
 use `--body-style-probe`. It compares the ordinary named-style package with a
-candidate that applies the stored visible-flow formatting. Keep the candidate
-only when the same-content PDF comparison improves without page or zone
-regressions; the conflict remains a candidate in ordinary conversion.
+candidate that applies the stored visible-flow formatting. Keep the Word named
+style and exemplar immutable: the candidate must set only
+`document.render_calibration.body_style_mode: visible_flow_exemplar` with
+`status: render_probe`. Keep it only when the same-content PDF comparison
+improves without page or zone regressions and strict promotion writes
+`render_verified`; the conflict remains a candidate in ordinary conversion.
 
 The same probe also emits body-scoped paragraph-spacing candidates when a
 non-table Word body role has a resolved boundary of at least 6pt. Resolve the
@@ -295,7 +311,7 @@ Do not treat variant search as permission to relax the gate. A selected variant 
 
 For IMS/Baltzer-style legacy classes, the runner detects `\documentclass{imsart}`/`\documentclass{baltzer}` or the `frontmatter + aug + kwd` pattern. Because those old front-matter macros can fail on modern TeX before labels are resolved, the adapter uses stable `maketitle` plus explicit Abstract/Keywords text while preserving the official class and preamble.
 
-## Thirty-Case Training Loop
+## Admitted-Corpus Training Loop
 
 For repeatable offline runs, retain official LaTeX source archives under the
 corpus-level `official_sources/<case>/latex/` cache. The runner restores only
@@ -310,18 +326,18 @@ official class/style contains an unambiguous PDFTeX-only primitive such as
 Class-specific title metadata or end markers required by a known official
 class belong in its regression adapter, never in the generated Temp2TeX class.
 
-Use `$corpusRoot\manifest.json` as the
-canonical 30-case training surface. The separate CJK direct-format extension
-is tracked in that manifest's `extensions` field.
+Use `$corpusRoot\manifest-60.json` as the canonical admitted training surface.
+The earlier 30-case manifest and any direct-format CJK extensions remain
+historical or targeted subsets; they do not replace the current full corpus.
 
 After a run, aggregate the training signal:
 
 ```powershell
 python "$skillRoot\scripts\analyze_regression_training.py" `
-  --run canonical30="$corpusRoot\iteration-next-30case" `
+  --run canonical60="$corpusRoot\iteration-next-60case" `
   --run cjk="$corpusRoot\iteration-next-cjk" `
-  --output-json "$corpusRoot\training_signal_30case.json" `
-  --output-md "$corpusRoot\training_signal_30case.md"
+  --output-json "$corpusRoot\training_signal_60case.json" `
+  --output-md "$corpusRoot\training_signal_60case.md"
 ```
 
 When aggregating more than one iteration, treat a change between

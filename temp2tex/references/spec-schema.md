@@ -19,6 +19,11 @@
     "source_urls": [],
     "language": "en"
   },
+  "source_annotations": {
+    "content_controls": [],
+    "comments": [],
+    "instruction": "Keep as source evidence only."
+  },
   "document": {
     "paper": "a4paper",
     "paper_dimensions_mm": null,
@@ -89,6 +94,16 @@
       "abstract_to_keywords": {"status": "default", "resolved_pt": 6, "rule": "max(previous space-after, following space-before); emit once"}
     }
   },
+  "footnotes": {
+    "enabled": true,
+    "marker_style": "arabic",
+    "marker_evidence": {},
+    "reference_evidence": []
+  },
+  "assets": {
+    "word_media": [],
+    "vml_shapes": []
+  },
   "abstracts": {
     "english": true,
     "chinese": false,
@@ -134,7 +149,10 @@
     "booktabs": true,
     "caption_style": {},
     "note_style": {},
-    "layout_evidence": {}
+    "layout_evidence": {
+      "cell_format_samples": [],
+      "cell_format_samples_truncated": false
+    }
   },
   "figures": {
     "caption_position": "below",

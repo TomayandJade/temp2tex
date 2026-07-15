@@ -213,6 +213,20 @@ def evaluate(
             reasons.append("page.render_calibration.body_parskip_pt must be between 0pt and 72pt.")
         if not str(page_calibration.get("source", "")).strip():
             reasons.append("Body paragraph-spacing calibration must record its Word source rationale.")
+    document_calibration = nested(candidate_spec, ("document", "render_calibration"), {})
+    body_style_active = (
+        isinstance(document_calibration, dict)
+        and str(document_calibration.get("status", "")).lower() == "render_probe"
+        and "body_style_mode" in document_calibration
+    )
+    if body_style_active:
+        if str(document_calibration.get("body_style_mode", "")).lower() != "visible_flow_exemplar":
+            reasons.append("Visible-body-style calibration must use body_style_mode=visible_flow_exemplar.")
+        source_candidate = nested(original_spec, ("page", "source_body_style", "visible_flow_override_candidate"), {})
+        if not isinstance(source_candidate, dict) or not source_candidate:
+            reasons.append("Visible-body-style calibration requires a recorded visible Word flow-body candidate.")
+        if not str(document_calibration.get("source", "")).strip():
+            reasons.append("Visible-body-style calibration must record its Word source rationale.")
     if original_without != candidate_without:
         reasons.append("Candidate changes fields outside the allowed render_calibration paths.")
     if candidate_compile.get("success") is not True:

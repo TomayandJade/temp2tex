@@ -830,11 +830,16 @@ def prepare_official_latex_sources(downloads_dir: Path, latex_root: Path, prefer
         lower = src.name.lower()
         if lower.endswith(".zip"):
             reports.extend(safe_extract_zip_recursive(src, latex_root / safe_name(src.stem)))
-        elif lower.endswith((".tex", ".cls", ".sty", ".bst")):
+        else:
+            # A direct official package may ship its graphics, bibliography
+            # databases, fonts, or data beside the source files. Keep every
+            # non-archive artifact under its relative path so class-file
+            # dependencies are not mistaken for an official compile failure.
             direct_tex_root.mkdir(parents=True, exist_ok=True)
-            target = direct_tex_root / src.name
+            target = direct_tex_root / src.relative_to(downloads_dir / "latex")
+            target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, target)
-            reports.append({"ok": True, "archive": str(src), "outdir": str(direct_tex_root), "files": [src.name]})
+            reports.append({"ok": True, "archive": str(src), "outdir": str(direct_tex_root), "files": [str(target.relative_to(direct_tex_root))]})
     main_tex = find_main_tex(latex_root, preferred_patterns=preferred_patterns)
     return reports, main_tex
 
@@ -1035,6 +1040,21 @@ NORMALIZED_METADATA_COMMANDS = {
 }
 
 
+TEMP2TEX_REGRESSION_HOOKS = r"""% Preserve generated Temp2TeX class behavior during fixture injection.
+% Official LaTeX classes receive harmless no-op definitions instead.
+\providecommand{\tempTWOEnableLineNumbers}{}
+\providecommand{\journalstartbodycolumns}{}
+"""
+
+
+def apply_temp2tex_regression_hooks(body: str) -> tuple[str, bool]:
+    """Invoke generated-class hooks that the fixed fixture would otherwise skip."""
+    marker = r"\tempTwoTexBodyBegin"
+    if marker not in body:
+        return body, False
+    return body.replace(marker, r"\journalstartbodycolumns" + "\n" + marker, 1), True
+
+
 def strip_source_front_matter_metadata(preamble: str) -> tuple[str, list[str]]:
     """Remove source example metadata before injecting the fixed manuscript.
 
@@ -1102,7 +1122,8 @@ def make_normalized_project(src_root: Path, main_tex: Path, dest_root: Path, ada
     stress_body, journalbackmatter_adapter = adapt_stress_backmatter_interface(stress_body, src_root)
     stress_body, journalappendix_adapter = adapt_stress_appendix_interface(stress_body, src_root)
     injected_body, structural_wrapper = inject_normalized_stress_body(source, stress_body)
-    normalized = f"{preamble}\n\n% Temp2TeX regression preamble injection\n{stress_preamble}\n\n{begin}\n\n% Temp2TeX regression body injection\n{injected_body}\n\n\\end{{document}}\n"
+    injected_body, temp2tex_body_hook = apply_temp2tex_regression_hooks(injected_body)
+    normalized = f"{preamble}\n\n% Temp2TeX regression preamble injection\n{stress_preamble}\n\n{begin}\n{TEMP2TEX_REGRESSION_HOOKS}\n\\tempTWOEnableLineNumbers\n\n% Temp2TeX regression body injection\n{injected_body}\n\n\\end{{document}}\n"
     normalized_main.write_text(normalized, encoding="utf-8")
     return normalized_main, {
         "ok": True,
@@ -1117,6 +1138,7 @@ def make_normalized_project(src_root: Path, main_tex: Path, dest_root: Path, ada
         "journaltable_adapter": journaltable_adapter,
         "journalbackmatter_adapter": journalbackmatter_adapter,
         "journalappendix_adapter": journalappendix_adapter,
+        "temp2tex_body_hook": temp2tex_body_hook,
         "stripped_source_metadata_commands": stripped_metadata,
     }
 
@@ -1536,7 +1558,12 @@ def build_temp2tex_variants(
         candidate = body_role.get("visible_flow_override_candidate")
         if isinstance(candidate, dict) and candidate:
             add_variant("visible-body-exemplar-probe", {
-                "page.source_body_style.render_mode": "visible_flow_exemplar",
+                "document.render_calibration": {
+                    "status": "render_probe",
+                    "proposal_mode": "visible_body_style",
+                    "body_style_mode": "visible_flow_exemplar",
+                    "source": "Dominant visible Word flow-body formatting conflicts with the named generic body style; requires strict same-content PDF promotion",
+                },
             })
         if body_role.get("evidence_status") != "table_cell_body_exemplar":
             paragraph_sources = []

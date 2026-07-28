@@ -18,7 +18,7 @@ Use `.sty` only as a legacy compatibility shim or when the official evidence say
 Put reusable template behavior in the class:
 
 - `\LoadClass` choice and class options.
-- Paper size, margins, columns, column gap, text block, header/footer, page numbering.
+- Paper size, margins, columns, column gap, text block, header/footer, page numbering, and line-numbering policy.
 - Named body, abstract, keyword, or reference content-box environments when the
   Word evidence gives those roles different left/right indents. Keep the
   physical page frame separate from these role-level boxes.
@@ -48,10 +48,24 @@ written package. Keep title-page material outside the body interface unless
 its Word role has the same content-box evidence.
 
 For basic editable front matter, the bundled class exposes repeatable
-`\affiliation{...}` calls and `\correspondingauthor{...}` alongside `\title`,
-`\author`, and `\date`. A journal that needs author-to-affiliation markers,
-ORCID, received dates, or editorial metadata should extend this interface in
-the class, with all visible layout rules kept out of `main.tex`.
+`\affiliation{...}` calls, `\correspondingauthor{...}`, and repeatable
+`\journalmetadata[kind]{...}` calls alongside `\title`, `\author`, and
+`\date`. The supported typed values are `publication_id`, `doi`, `dates`,
+`funding`, `contributor_note`, and `editorial_note`; write source labels with
+`\journalmetadatalabel[kind]{...}`. Each detected kind has its own line,
+value, and label-format hook in the class. Do not merge a DOI, received date,
+funding statement, classification code, or author biography merely because
+they appear next to one another in Word. The untyped
+`\journalmetadata{...}` form is a documented generic default, not evidence
+for any source-specific kind, and the generic fixture intentionally leaves all
+metadata empty. Keep visible layout rules in the class rather than `main.tex`.
+
+When one or more typed metadata fields are observed, ship a commented
+`metadata.tex` skeleton and a commented `\input{metadata.tex}` in `main.tex`.
+Each skeleton line should retain the source label and typed command but replace
+the article-specific value with an editable placeholder. Do not copy a sample
+DOI, funding number, author biography, or received date into the default
+manuscript.
 
 The class must redefine the abstract environment for every supported
 `abstracts.label_mode`: inline, separate, none, and default. Do not fall back to
@@ -70,7 +84,8 @@ Put user-facing usage and example manuscript content in `main.tex`:
 - Metadata values that demonstrate the class commands.
 - Abstract and keyword body text.
 - Representative sections and heading levels.
-- Example paragraph, list, equation, table, figure, footnote, references, and appendix.
+- Example paragraph, every observed list family/level, equation, table, figure, footnote, references, and appendix. A list family belongs in editable class-owned `journalitemize`/`journalenumerate` configuration; its visible `\item` examples remain in `main.tex`. Do not flatten distinct Word numbering definitions into one generic list setting.
+- Put reusable equation display, counter, tag, and spacing behavior in `journal-template.cls` through `journalequation`; keep each source OMML conversion candidate or explicit manual-translation record in `equations.tex`, then move only rendered-checked examples into `main.tex`.
 - Keep the editable manuscript sequence as body, declarations/statements, references, then appendix. Call `\journalbackmatter` before the first declaration and `\journalappendix` only after the bibliography.
 - Editable bibliography fixture plus an optional `references.bib` backend
   migration point; use the journal's official `.bst` or BibLaTeX commands when
@@ -92,7 +107,7 @@ Keep `main.tex` as a clean template the user can start from. It should not conta
 
 ## Chinese and Mixed-Language Templates
 
-Use XeLaTeX when Chinese text may appear. Put CJK package/font decisions in the class and keep source files UTF-8. Do not add CJK machinery to English-only templates unless official evidence or user content requires it.
+Use XeLaTeX when Chinese text may appear. Put CJK package/font decisions in the class and keep source files UTF-8. Do not add CJK machinery to English-only templates unless official evidence or user content requires it. For English-only packages, prefer an engine-portable font branch: XeLaTeX/LuaLaTeX may use a source-backed system font, while PDFLaTeX must use a named TeX fallback and disclose that fallback in the generated README and gap log. Never load `fontspec` unconditionally in an English-only class.
 
 For bilingual templates, provide separate commands or fields only when the source requires them, such as English and Chinese titles, abstracts, keywords, author names, or affiliations.
 
@@ -123,7 +138,36 @@ class exposes `\journalfirstpageheaderleft`, `\journalfirstpageheadercenter`,
 `tempTwoFirstPage` style. Populate and activate that style only after a
 same-content PDF comparison verifies the first-page logo, rule, text, and
 page-number behavior; do not reuse first-page assets in normal `fancyhdr`
-slots.
+slots. A logo and masthead text that share one Word slot must remain separate
+composable fields in the class: activating the logo must not replace the
+ordered masthead paragraphs. Preserve all observed first-page header/footer
+paragraphs as an ordered block, then calibrate its height and baseline from
+the rendered first page. For a logo beside masthead text, use top-aligned
+parallel boxes and reserve the taller component's height, not their combined
+height; baseline alignment that places the text below the logo is a failed
+candidate. A multi-line first-page footer may not behave like a conventional
+bottom footer. Keep a `fancyfoot` candidate editable, but promote a vertical
+offset only from a local rendered-zone check; use a separately positioned
+first-page block when the source footer is tied to article flow rather than
+the physical page bottom.
+
+Within a header or footer paragraph, preserve a right-aligned Word tab as one
+line-level layout rather than concatenating its left and right text. Some
+legacy DOC conversions lose the tab node but retain two text runs separated by
+a very long blank run. Treat that only as a candidate for `\hfill`-style
+layout, record the degraded evidence, and verify both endpoint boxes against
+the rendered source before promotion.
+
+When Word has distinct `default` and `even` variants, expose
+`\journaloddheader...` / `\journaloddfooter...` and
+`\journalevenheader...` / `\journalevenfooter...` separately. The generated
+`tempTwoMirroredRunning` style is an editable candidate that binds those
+interfaces to odd/even selectors; it is not enabled by default. Do not map an
+even-page author head into an odd-page title head, or reduce the two variants
+to a generic `\pagestyle{fancy}` merely because that compiles.
+When an even Word variant exists, load the LaTeX base class with `twoside`
+even if Word does not use mirrored margins. `fancyhdr` otherwise ignores the
+even-page selectors and gives a misleading successful compilation.
 
 ## Official Class Preservation
 

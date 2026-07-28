@@ -107,6 +107,111 @@ def collect_docx_text(docx_item: dict | None) -> str:
     return "\n".join(parts)
 
 
+def infer_abstract_length_limit(notes: str, evidence: str) -> dict:
+    """Return a source-backed abstract limit only from an explicit rule.
+
+    A number near an abstract sample is not necessarily a limit. Keep Chinese
+    character limits separate from English word limits and leave conflicts
+    unresolved so the model does not choose a publisher rule by coincidence.
+    """
+    sources = [("official_notes", notes), ("template_or_source_text", evidence)]
+    candidates: list[dict] = []
+    english_cues = re.compile(
+        r"\b(?:not\s+(?:exceed|exceeding)|no\s+more\s+than|not\s+more\s+than|"
+        r"maximum(?:\s+of)?|up\s+to|limited?\s+to|within)\b",
+        re.IGNORECASE,
+    )
+    chinese_cues = re.compile(r"(?:不超过|不得超过|不多于|不超过|最多|限(?:制)?为|控制在|以内|以下|上限)")
+    for source, text in sources:
+        for raw_segment in re.split(r"[\r\n。；;.!?]+", text or ""):
+            segment = re.sub(r"\s+", " ", raw_segment).strip()
+            if not segment:
+                continue
+            lower = segment.lower()
+            has_english_abstract = bool(re.search(r"\babstract\b", lower))
+            has_chinese_abstract = "摘要" in segment
+            if has_english_abstract and english_cues.search(segment):
+                for match in re.finditer(r"\b(\d{2,4})\s+words?\b", segment, re.IGNORECASE):
+                    candidates.append({
+                        "value": int(match.group(1)),
+                        "unit": "words",
+                        "source": source,
+                        "excerpt": segment[:240],
+                    })
+            if has_chinese_abstract and chinese_cues.search(segment):
+                for match in re.finditer(r"(\d{2,4})\s*(?:个?汉?字|字)", segment):
+                    candidates.append({
+                        "value": int(match.group(1)),
+                        "unit": "characters",
+                        "source": source,
+                        "excerpt": segment[:240],
+                    })
+    distinct = {(item["value"], item["unit"]) for item in candidates}
+    if len(distinct) == 1:
+        value, unit = next(iter(distinct))
+        return {
+            "status": "source",
+            "value": value,
+            "unit": unit,
+            "candidates": candidates,
+        }
+    if distinct:
+        return {
+            "status": "ambiguous",
+            "value": None,
+            "unit": None,
+            "candidates": candidates,
+        }
+    return {"status": "not_observable", "value": None, "unit": None, "candidates": []}
+
+
+def infer_keyword_count_limit(notes: str, evidence: str) -> dict:
+    """Extract an explicit keyword-count constraint without inventing one."""
+    sources = [("official_notes", notes), ("template_or_source_text", evidence)]
+    candidates: list[dict] = []
+    english_marker = re.compile(r"\b(?:keywords?|key\s+words?|index\s+terms?)\b", re.IGNORECASE)
+    english_limit_cue = re.compile(
+        r"\b(?:between|from|at\s+least|no\s+more\s+than|not\s+more\s+than|"
+        r"maximum(?:\s+of)?|up\s+to|limited?\s+to)\b",
+        re.IGNORECASE,
+    )
+    chinese_limit_cue = re.compile(r"(?:不少于|不低于|不超过|不得超过|不多于|最多|限(?:制)?为|控制在|以内|以下)")
+    for source, text in sources:
+        for raw_segment in re.split(r"[\r\n。；;.!?]+", text or ""):
+            segment = re.sub(r"\s+", " ", raw_segment).strip()
+            if not segment:
+                continue
+            english = bool(english_marker.search(segment))
+            chinese = "关键词" in segment or "关键字" in segment or "索引词" in segment
+            if english and (english_limit_cue.search(segment) or re.search(r"\d\s*(?:-|–|to)\s*\d", segment, re.IGNORECASE)):
+                range_match = re.search(r"\b(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\b", segment, re.IGNORECASE)
+                max_match = re.search(r"\b(\d{1,2})\s+(?:keywords?|key\s+words?|index\s+terms?)\b", segment, re.IGNORECASE)
+                if range_match:
+                    minimum, maximum = int(range_match.group(1)), int(range_match.group(2))
+                elif max_match:
+                    minimum, maximum = None, int(max_match.group(1))
+                else:
+                    continue
+                candidates.append({"minimum": minimum, "maximum": maximum, "source": source, "excerpt": segment[:240]})
+            if chinese and (chinese_limit_cue.search(segment) or re.search(r"\d\s*(?:-|—|至|到)\s*\d", segment)):
+                range_match = re.search(r"(\d{1,2})\s*(?:-|—|至|到)\s*(\d{1,2})\s*个?", segment)
+                max_match = re.search(r"(?:不超过|不得超过|不多于|最多|限(?:制)?为|控制在)\s*(\d{1,2})\s*个?", segment)
+                if range_match:
+                    minimum, maximum = int(range_match.group(1)), int(range_match.group(2))
+                elif max_match:
+                    minimum, maximum = None, int(max_match.group(1))
+                else:
+                    continue
+                candidates.append({"minimum": minimum, "maximum": maximum, "source": source, "excerpt": segment[:240]})
+    distinct = {(item["minimum"], item["maximum"]) for item in candidates}
+    if len(distinct) == 1:
+        minimum, maximum = next(iter(distinct))
+        return {"status": "source", "minimum": minimum, "maximum": maximum, "unit": "keywords", "candidates": candidates}
+    if distinct:
+        return {"status": "ambiguous", "minimum": None, "maximum": None, "unit": "keywords", "candidates": candidates}
+    return {"status": "not_observable", "minimum": None, "maximum": None, "unit": "keywords", "candidates": []}
+
+
 def representative_section(docx_item: dict | None, columns: str | None = None) -> dict | None:
     """Select the repeated manuscript-body frame rather than blindly using page one."""
     if not docx_item:
@@ -254,32 +359,41 @@ def infer_columns(docx_item: dict | None, evidence: str) -> str:
     return "single"
 
 
-def body_column_transition(docx_item: dict | None, columns: str) -> bool:
-    """Detect a single-column title section followed by double-column body text."""
+def body_column_transition_evidence(docx_item: dict | None, columns: str) -> dict:
+    """Return the first source-backed one-column to body-column transition."""
     if columns != "double" or not docx_item:
-        return False
+        return {"status": "not_detected"}
     sections = docx_item.get("inspection", {}).get("sections", [])
-    if not sections:
-        return False
+    if not isinstance(sections, list):
+        return {"status": "not_detected"}
     # In Word section properties, an omitted w:cols means the one-column
-    # default.  A first omitted value followed by an explicit double-column
-    # body section is therefore positive transition evidence, not an unknown
-    # value.  Do not infer a transition unless the selected body section is
-    # genuinely later; a one-section template remains whatever its section
-    # declares.
-    first_columns = twips_int(sections[0].get("columns")) or 1
-    body = representative_section(docx_item, columns)
-    body_columns = twips_int(body.get("columns")) if body else None
-    body_index = twips_int(body.get("index")) if body else None
-    first_index = twips_int(sections[0].get("index"))
-    return (
-        len(sections) > 1
-        and first_columns == 1
-        and (body_columns or 1) >= 2
-        and body_index is not None
-        and first_index is not None
-        and body_index > first_index
-    )
+    # default. Preserve the actual break type: a next-page transition cannot
+    # be rendered as a wide \twocolumn[...] front-matter block.
+    for current, following in zip(sections, sections[1:]):
+        if not isinstance(current, dict) or not isinstance(following, dict):
+            continue
+        from_columns = twips_int(current.get("columns")) or 1
+        to_columns = twips_int(following.get("columns")) or 1
+        if from_columns != 1 or to_columns < 2:
+            continue
+        break_type = str(current.get("section_break_type") or "nextPage")
+        mode = "continuous" if break_type.lower() == "continuous" else "new_page"
+        return {
+            "status": "source",
+            "from_section_index": twips_int(current.get("index")),
+            "to_section_index": twips_int(following.get("index")),
+            "from_columns": from_columns,
+            "to_columns": to_columns,
+            "word_break_type": break_type,
+            "latex_mode": mode,
+            "source": "adjacent official Word section properties",
+        }
+    return {"status": "not_detected"}
+
+
+def body_column_transition(docx_item: dict | None, columns: str) -> bool:
+    """Detect a source-backed single-column title section before double-column body."""
+    return body_column_transition_evidence(docx_item, columns).get("status") == "source"
 
 
 def section_flow_evidence(docx_item: dict | None) -> dict:
@@ -296,7 +410,7 @@ def section_flow_evidence(docx_item: dict | None) -> dict:
             for key in (
                 "index", "section_break_type", "page_width_twips", "page_height_twips",
                 "orientation", "margins_twips", "columns", "column_space_twips",
-                "columns_equal_width", "column_widths_twips", "different_first_page",
+                "columns_equal_width", "column_widths_twips", "different_first_page", "page_numbering",
             )
             if section.get(key) is not None
         })
@@ -304,6 +418,27 @@ def section_flow_evidence(docx_item: dict | None) -> dict:
         "source": "official Word section properties",
         "sections": selected,
         "requires_manual_boundary_review": len(selected) > 1,
+    }
+
+
+def page_numbering_evidence(docx_item: dict | None) -> dict:
+    """Preserve Word section page-number format/restart rules as a system."""
+    sections = [] if not docx_item else docx_item.get("inspection", {}).get("sections", [])
+    overrides = []
+    for section in sections if isinstance(sections, list) else []:
+        if not isinstance(section, dict):
+            continue
+        numbering = section.get("page_numbering")
+        if not isinstance(numbering, dict) or not numbering:
+            continue
+        overrides.append({"section_index": section.get("index"), **numbering})
+    return {
+        "present": bool(overrides),
+        "evidence_status": "source" if overrides else "not_observable",
+        "sections": overrides,
+        "source": "official Word w:pgNumType section properties",
+        "requires_manual_boundary_review": len(overrides) > 1,
+        "requires_visual_review": bool(overrides),
     }
 
 
@@ -559,7 +694,13 @@ def table_layout_evidence(docx_item: dict | None) -> dict:
         "width_type": selected.get("width_type"),
         "alignment": selected.get("alignment"),
         "layout": selected.get("layout"),
+        "indent": selected.get("indent", {}),
+        "default_cell_margins": selected.get("default_cell_margins", {}),
+        "positioning": selected.get("positioning", {}),
+        "overlap": selected.get("overlap"),
+        "shading": selected.get("shading", {}),
         "style_id": selected.get("style_id"),
+        "style_evidence": selected.get("style_evidence"),
         "grid_column_widths_twips": selected.get("grid_column_widths_twips", []),
         "has_merged_cells": bool(selected.get("has_merged_cells")),
         "border_profile": selected.get("border_profile", "unknown"),
@@ -575,6 +716,8 @@ def table_layout_evidence(docx_item: dict | None) -> dict:
         "header_cell_samples": selected.get("header_cell_samples", []),
         "cell_format_samples": selected.get("cell_format_samples", []),
         "cell_format_samples_truncated": bool(selected.get("cell_format_samples_truncated")),
+        "row_format_samples": selected.get("row_format_samples", []),
+        "row_format_samples_truncated": bool(selected.get("row_format_samples_truncated")),
         "header_row_height_twips": selected.get("header_row_height_twips"),
         "header_row_height_rule": selected.get("header_row_height_rule"),
         "caption_relation": selected.get("caption_relation", {}),
@@ -797,7 +940,9 @@ def caption_position_evidence(layout: dict, default: str, kind: str) -> tuple[st
     relation = layout.get("caption_relation", {}) if isinstance(layout, dict) else {}
     position = relation.get("position") if isinstance(relation, dict) else None
     confidence = str(relation.get("confidence") or "") if isinstance(relation, dict) else ""
-    if position in {"above", "below"} and confidence in {"adjacent", "nearby"}:
+    disposition = relation.get("evidence_disposition") if isinstance(relation, dict) else {}
+    confirmed = isinstance(disposition, dict) and disposition.get("state") == "confirmed_source_relation"
+    if position in {"above", "below"} and confidence in {"adjacent", "nearby"} and confirmed:
         return str(position), {
             "status": "source",
             "source": "official Word document-flow adjacency",
@@ -809,6 +954,8 @@ def caption_position_evidence(layout: dict, default: str, kind: str) -> tuple[st
         reason = "caption-like text occurs inside the object container and does not prove an external caption order"
     elif confidence == "distant":
         reason = "nearest caption-like paragraph is too distant to attach safely to the selected object"
+    elif isinstance(disposition, dict) and disposition.get("state"):
+        reason = f"caption relation disposition is {disposition['state']} and cannot set caption order"
     return default, {
         "status": "default",
         "source": "Temp2TeX language-neutral journal default",
@@ -844,6 +991,7 @@ def equation_layout_evidence(docx_item: dict | None) -> dict:
     ]
     return {
         "present": True,
+        "evidence_status": "source",
         "sample_count": len(body_samples),
         "display_sample_count": len(display_samples),
         "numbering": "numbered" if numbers else "unverified",
@@ -855,6 +1003,34 @@ def equation_layout_evidence(docx_item: dict | None) -> dict:
         "latex_candidates": candidates,
         "requires_math_translation": bool(partial),
         "requires_visual_review": True,
+    }
+
+
+def block_decoration_evidence(docx_item: dict | None) -> dict:
+    """Record visible Word paragraph block decoration without guessing a TeX box."""
+    if not docx_item:
+        return {"present": False, "source": "no Word document evidence"}
+    samples = []
+    for paragraph in docx_item.get("inspection", {}).get("paragraph_samples", []):
+        if not isinstance(paragraph, dict):
+            continue
+        effective = paragraph.get("effective_format") if isinstance(paragraph.get("effective_format"), dict) else {}
+        paragraph_format = effective.get("paragraph") if isinstance(effective.get("paragraph"), dict) else {}
+        decoration = {key: paragraph_format.get(key) for key in ("borders", "shading", "frame") if paragraph_format.get(key)}
+        if decoration:
+            samples.append({
+                "paragraph_index": paragraph.get("index"),
+                "text": str(paragraph.get("format_span_text") or paragraph.get("text") or "")[:220],
+                "in_table_cell": bool(paragraph.get("in_table_cell")),
+                "decoration": decoration,
+            })
+    return {
+        "present": bool(samples),
+        "evidence_status": "source" if samples else "not_observable",
+        "sample_count": len(samples),
+        "samples": samples[:20],
+        "source": "official Word paragraph border, shading, and frame XML",
+        "requires_visual_review": bool(samples),
     }
 
 
@@ -884,17 +1060,69 @@ def endnote_style_evidence(docx_item: dict | None) -> dict:
 
 
 def list_layout_evidence(docx_item: dict | None) -> dict:
-    """Select a visible Word list definition without applying it to body text."""
+    """Retain every visible body-list definition without applying it to body text."""
     if not docx_item:
         return {"present": False, "source": "no Word document evidence"}
-    items = docx_item.get("inspection", {}).get("list_items", [])
+    inspection = docx_item.get("inspection", {})
+    items = inspection.get("list_items", [])
     if not isinstance(items, list) or not items:
         return {"present": False, "source": "no visible Word numbered or bulleted paragraphs"}
-    candidates = [item for item in items if str(item.get("number_format") or "").lower() not in {"none"}]
-    selected = candidates[0] if candidates else items[0]
+
+    reference_markers = {"references", "reference", "bibliography", "参考文献", "参考资料"}
+    reference_start = min(
+        (
+            int(paragraph.get("index") or 0)
+            for paragraph in inspection.get("paragraph_samples", [])
+            if isinstance(paragraph, dict)
+            and str(paragraph.get("text") or "").strip().lower() in reference_markers
+        ),
+        default=0,
+    )
+    body_items = [
+        item for item in items
+        if isinstance(item, dict)
+        and (not reference_start or int(item.get("paragraph_index") or 0) <= reference_start)
+    ]
+    if not body_items:
+        return {
+            "present": False,
+            "source": "visible Word list evidence occurs only in the reference zone",
+            "reference_list_item_count": len(items),
+        }
+
+    systems: dict[str, list[dict]] = {}
+    for item in body_items:
+        num_id = item.get("num_id")
+        style_id = item.get("style_id")
+        key = f"num:{num_id}" if num_id not in (None, "") else f"style:{style_id or 'unnamed'}"
+        systems.setdefault(key, []).append(item)
+
+    system_records = []
+    for key, system_items in sorted(systems.items()):
+        levels: dict[str, dict] = {}
+        for item in system_items:
+            level = str(item.get("level") or "0")
+            levels.setdefault(level, {
+                field: item.get(field)
+                for field in ("number_format", "level_text", "start", "left_indent_twips", "hanging_twips", "source")
+                if item.get(field) is not None
+            })
+        formats = sorted({str(item.get("number_format") or "unknown").lower() for item in system_items})
+        system_records.append({
+            "key": key,
+            "kind": "itemize" if formats and set(formats) == {"bullet"} else "enumerate",
+            "number_formats": formats,
+            "levels": levels,
+            "paragraph_indexes": [item.get("paragraph_index") for item in system_items],
+            "sample_count": len(system_items),
+            "in_table_cell_count": sum(bool(item.get("in_table_cell")) for item in system_items),
+        })
+
+    candidates = [item for item in body_items if str(item.get("number_format") or "").lower() not in {"none"}]
+    selected = candidates[0] if candidates else body_items[0]
     number_format = str(selected.get("number_format") or "decimal").lower()
     kind = "itemize" if number_format in {"bullet", "none"} else "enumerate"
-    levels = sorted({str(item.get("level") or "0") for item in items})
+    levels = sorted({str(item.get("level") or "0") for item in body_items})
     return {
         "present": True,
         "kind": kind,
@@ -903,8 +1131,11 @@ def list_layout_evidence(docx_item: dict | None) -> dict:
         "left_indent_twips": selected.get("left_indent_twips"),
         "hanging_twips": selected.get("hanging_twips"),
         "levels_seen": levels,
-        "sample_count": len(items),
-        "source": "official Word numbering.xml plus paragraph-level or style-level list evidence",
+        "sample_count": len(body_items),
+        "reference_list_item_count": len(items) - len(body_items),
+        "system_count": len(system_records),
+        "systems": system_records,
+        "source": "official Word numbering.xml plus paragraph-level or style-level body-list evidence",
         "requires_visual_review": True,
     }
 
@@ -959,6 +1190,7 @@ def toc_evidence(docx_item: dict | None) -> dict:
         "source": "official Word TOC field" if has_field else "no official Word TOC field",
         "field_samples": fields,
         "heading_samples": headings,
+        "entry_tab_stops": evidence.get("entry_tab_stops", []) if isinstance(evidence.get("entry_tab_stops", []), list) else [],
         "heading_only_candidate": bool(headings and not has_field),
         "depth": depth,
     }
@@ -1189,17 +1421,274 @@ def line_number_evidence(docx_item: dict | None, evidence: str) -> dict:
     """Prefer Word section properties over prose that merely mentions line numbers."""
     structural = docx_item.get("inspection", {}).get("line_numbering", {}) if docx_item else {}
     if isinstance(structural, dict) and structural.get("enabled"):
+        sections = []
+        for raw_section in structural.get("sections", []):
+            if not isinstance(raw_section, dict):
+                continue
+            section = dict(raw_section)
+            implicit_defaults = {}
+            # ISO/IEC 29500's lnNumType example states that an omitted start
+            # restarts at one. Keep the raw absence visible and distinguish
+            # this standards default from a journal-specific inference.
+            if section.get("start") in {None, ""}:
+                implicit_defaults["start"] = {
+                    "value": "1",
+                    "source": "ISO/IEC 29500 lnNumType default; Microsoft Learn LineNumberType remarks",
+                }
+            if implicit_defaults:
+                section["implicit_defaults"] = implicit_defaults
+            sections.append(section)
         return {
             "enabled": True,
             "status": "source",
             "source": structural.get("source", "official Word section line-numbering properties"),
-            "sections": structural.get("sections", []),
+            "sections": sections,
         }
     mentioned = contains(evidence, "line numbering", "line numbers")
     return {
         "enabled": bool(mentioned),
         "status": "instruction" if mentioned else "not_detected",
         "source": "official template instruction text" if mentioned else "no Word line-numbering property or instruction found",
+    }
+
+
+def tab_stop_layout_evidence(docx_item: dict | None) -> dict:
+    """Preserve visible non-TOC Word tab use without inventing one global layout."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    samples = inspection.get("tab_stop_evidence", []) if isinstance(inspection, dict) else []
+    samples = [item for item in samples if isinstance(item, dict)] if isinstance(samples, list) else []
+    return {
+        "enabled": bool(samples),
+        "status": "source" if samples else "not_detected",
+        "source": "visible Word tab characters plus effective paragraph tab-stop definitions" if samples else "no visible non-TOC Word tab-stop use observed",
+        "samples": samples,
+    }
+
+
+def drop_cap_layout_evidence(docx_item: dict | None) -> dict:
+    """Retain Word drop-cap semantics and the following body-paragraph context."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    samples = inspection.get("drop_cap_evidence", []) if isinstance(inspection, dict) else []
+    samples = [item for item in samples if isinstance(item, dict)] if isinstance(samples, list) else []
+    return {
+        "enabled": bool(samples),
+        "status": "source" if samples else "not_detected",
+        "source": "visible Word framePr dropCap plus adjacent paragraph evidence" if samples else "no visible Word drop-cap evidence observed",
+        "samples": samples,
+    }
+
+
+def character_effect_evidence(docx_item: dict | None) -> dict:
+    """Preserve local Word character effects for role-specific LaTeX mapping."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    samples = inspection.get("character_effect_evidence", []) if isinstance(inspection, dict) else []
+    samples = [item for item in samples if isinstance(item, dict)] if isinstance(samples, list) else []
+    return {
+        "enabled": bool(samples),
+        "status": "source" if samples else "not_detected",
+        "source": "visible Word run spans and named style rules with effective character-effect formatting" if samples else "no visible Word character-effect evidence observed",
+        "samples": samples,
+    }
+
+
+def character_style_evidence(docx_item: dict | None) -> dict:
+    """Preserve visible run references to named Word character styles."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    samples = inspection.get("character_style_evidence", []) if isinstance(inspection, dict) else []
+    samples = [item for item in samples if isinstance(item, dict)] if isinstance(samples, list) else []
+    unresolved = sorted({
+        str(item.get("character_style_id"))
+        for item in samples
+        if item.get("character_style_id") and not item.get("character_style_resolved")
+    })
+    return {
+        "enabled": bool(samples),
+        "status": "source" if samples else "not_detected",
+        "source": "visible Word runs referencing named character styles with resolved effective formatting" if samples else "no visible Word character-style reference observed",
+        "unresolved_style_ids": unresolved,
+        "samples": samples,
+    }
+
+
+def text_grid_evidence(docx_item: dict | None) -> dict:
+    """Preserve Word document-grid and local grid-override evidence."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("text_grid_evidence", {}) if isinstance(inspection, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    present = bool(evidence.get("present"))
+    return {
+        "observed": bool(evidence.get("observed")),
+        "enabled": present,
+        "status": "source" if present else "not_detected",
+        "relevance": evidence.get("relevance", "not_detected"),
+        "source": evidence.get("source", "Word document-grid and paragraph grid settings"),
+        "sections": evidence.get("sections", []) if isinstance(evidence.get("sections"), list) else [],
+        "paragraphs": evidence.get("paragraphs", []) if isinstance(evidence.get("paragraphs"), list) else [],
+        "styles": evidence.get("styles", []) if isinstance(evidence.get("styles"), list) else [],
+        "run_groups": evidence.get("run_groups", []) if isinstance(evidence.get("run_groups"), list) else [],
+    }
+
+
+def script_language_evidence(docx_item: dict | None) -> dict:
+    """Expose bounded Word language/script/RTL review evidence to the agent."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("script_language_evidence", {}) if isinstance(inspection, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    groups = evidence.get("review_groups", []) if isinstance(evidence.get("review_groups"), list) else []
+    return {
+        "observed": bool(evidence.get("observed")),
+        "present": bool(evidence.get("present")),
+        "status": "source" if evidence.get("present") else ("observed_nonblocking" if evidence.get("observed") else "not_detected"),
+        "relevance": evidence.get("relevance", "not_detected"),
+        "raw_occurrence_count": evidence.get("raw_occurrence_count", 0),
+        "raw_span_boundaries_retained_in": evidence.get("raw_span_boundaries_retained_in", "source_inventory.json"),
+        "review_grouping": evidence.get("review_grouping", "role-local Word language/script evidence"),
+        "review_groups": groups,
+        "source": evidence.get("source", "Word run language, complex-script, and RTL evidence"),
+    }
+
+
+def paragraph_direction_evidence(docx_item: dict | None) -> dict:
+    """Expose Word paragraph bidi/text-direction evidence without global inference."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("paragraph_direction_evidence", {}) if isinstance(inspection, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    groups = evidence.get("review_groups", []) if isinstance(evidence.get("review_groups"), list) else []
+    return {
+        "observed": bool(evidence.get("observed")),
+        "enabled": bool(evidence.get("present")),
+        "status": "source" if evidence.get("present") else ("observed_nonblocking" if evidence.get("observed") else "not_detected"),
+        "relevance": evidence.get("relevance", "not_detected"),
+        "raw_occurrence_count": evidence.get("raw_occurrence_count", 0),
+        "raw_paragraphs_retained_in": evidence.get("raw_paragraphs_retained_in", "source_inventory.json"),
+        "review_grouping": evidence.get("review_grouping", "role-local Word paragraph direction evidence"),
+        "review_groups": groups,
+        "source": evidence.get("source", "Word paragraph bidi and text-direction evidence"),
+    }
+
+
+def paragraph_break_policy_evidence(docx_item: dict | None) -> dict:
+    """Expose Word hyphenation/wrapping policy without setting a global TeX default."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("paragraph_break_policy_evidence", {}) if isinstance(inspection, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    groups = evidence.get("review_groups", []) if isinstance(evidence.get("review_groups"), list) else []
+    return {
+        "observed": bool(evidence.get("observed")),
+        "enabled": bool(evidence.get("present")),
+        "status": "source" if evidence.get("present") else ("observed_nonblocking" if evidence.get("observed") else "not_detected"),
+        "relevance": evidence.get("relevance", "not_detected"),
+        "raw_occurrence_count": evidence.get("raw_occurrence_count", 0),
+        "raw_paragraphs_retained_in": evidence.get("raw_paragraphs_retained_in", "source_inventory.json"),
+        "review_grouping": evidence.get("review_grouping", "role-local Word hyphenation/wrap evidence"),
+        "review_groups": groups,
+        "source": evidence.get("source", "Word paragraph automatic-hyphen and wrap evidence"),
+    }
+
+
+def theme_format_evidence(docx_item: dict | None) -> dict:
+    """Create a bounded theme review summary while retaining raw inventory evidence.
+
+    Theme-font aliases are commonly inherited by every Word run.  Repeating
+    those identical aliases in ``template_spec.json`` turns one source rule
+    into hundreds of apparent decisions and consumes the model context needed
+    for genuinely local formatting.  The extractor's source inventory remains
+    the authoritative per-span record; this function creates the compact,
+    role-aware review view used by the spec and generated evidence file.
+    """
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("theme_format_evidence", {}) if isinstance(inspection, dict) else {}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    samples = evidence.get("samples", []) if isinstance(evidence.get("samples"), list) else []
+    definition = evidence.get("definition", {}) if isinstance(evidence.get("definition"), dict) else {}
+    groups: dict[str, dict] = {}
+
+    def stable_json(value: object) -> str:
+        return json.dumps(value if isinstance(value, dict) else {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def review_identity(sample: dict) -> dict:
+        # A named style is an independent source rule.  A visible run is
+        # grouped only inside its source scope/style/container, so a footer,
+        # table cell, or differently styled title cannot disappear into body
+        # text merely because it inherited the same Office alias.
+        identity = {
+            "evidence_kind": sample.get("evidence_kind") or "visible_run_span",
+            "scope": sample.get("scope"),
+            "part": sample.get("part"),
+            "style_id": sample.get("style_id"),
+            "style_name": sample.get("style_name"),
+            "table_index": sample.get("table_index"),
+            "row_index": sample.get("row_index"),
+            "column_index": sample.get("column_index"),
+            "theme_color": sample.get("theme_color") or {},
+            "theme_font": sample.get("theme_font") or {},
+        }
+        return identity
+
+    for raw_sample in samples:
+        if not isinstance(raw_sample, dict):
+            continue
+        identity = review_identity(raw_sample)
+        key = stable_json(identity)
+        group = groups.get(key)
+        if group is None:
+            group = {
+                **identity,
+                "occurrence_count": 0,
+                "examples": [],
+                "source": "bounded review group; every original run/style occurrence remains in source_inventory.json",
+            }
+            groups[key] = group
+        group["occurrence_count"] += 1
+        if len(group["examples"]) >= 5:
+            continue
+        text = " ".join(str(raw_sample.get("text") or "").split())[:180]
+        example = {
+            "paragraph_index": raw_sample.get("paragraph_index"),
+            "start": raw_sample.get("start"),
+            "end": raw_sample.get("end"),
+            "text": text,
+        }
+        if example not in group["examples"]:
+            group["examples"].append(example)
+
+    review_groups = sorted(
+        groups.values(),
+        key=lambda group: (
+            str(group.get("evidence_kind") or ""),
+            str(group.get("scope") or ""),
+            str(group.get("part") or ""),
+            str(group.get("style_id") or ""),
+            int(group.get("table_index")) if isinstance(group.get("table_index"), int) else -1,
+            int(group.get("row_index")) if isinstance(group.get("row_index"), int) else -1,
+            int(group.get("column_index")) if isinstance(group.get("column_index"), int) else -1,
+            stable_json(group.get("theme_color")),
+            stable_json(group.get("theme_font")),
+        ),
+    )
+    return {
+        "present": bool(evidence.get("present")),
+        "status": "source" if evidence.get("present") else "not_detected",
+        "definition": definition,
+        "raw_sample_count": len(samples),
+        "raw_samples_retained_in": "source_inventory.json: files[].inspection.theme_format_evidence.samples",
+        "review_grouping": "same evidence kind, source scope/part/style/container, and Word theme color/font alias; up to five representative occurrences per group",
+        "review_groups": review_groups,
+        "source": evidence.get("source", "Word theme definition and theme-format references"),
+    }
+
+
+def unmodeled_format_property_evidence(docx_item: dict | None) -> dict:
+    """Carry unknown OOXML formatting nodes into the model's explicit review queue."""
+    inspection = docx_item.get("inspection", {}) if docx_item else {}
+    evidence = inspection.get("unmodeled_format_properties", {}) if isinstance(inspection, dict) else {}
+    properties = evidence.get("properties", []) if isinstance(evidence, dict) else []
+    properties = [item for item in properties if isinstance(item, dict)] if isinstance(properties, list) else []
+    return {
+        "present": bool(properties),
+        "status": "source" if properties else "not_detected",
+        "source": evidence.get("source", "Word OOXML format-property scan") if isinstance(evidence, dict) else "Word OOXML format-property scan",
+        "properties": properties,
     }
 
 
@@ -1224,6 +1713,157 @@ def direct_paragraph_evidence(paragraph: dict, role: str) -> dict:
         result["format_spans"] = spans
         result["format_span_text"] = paragraph.get("format_span_text", paragraph.get("text", ""))
     return result
+
+
+def format_span_evidence(paragraph: dict, span: dict, role: str) -> dict:
+    """Preserve one visible run span without promoting it to paragraph style.
+
+    Metadata lines commonly combine a label font with a different value font.
+    Keeping the run-level evidence separate lets the generated class expose a
+    label helper without pretending that every character in the line has the
+    same typeface.
+    """
+    parent_direct = paragraph.get("direct_format") if isinstance(paragraph.get("direct_format"), dict) else {}
+    parent_effective = paragraph.get("effective_format") if isinstance(paragraph.get("effective_format"), dict) else parent_direct
+    span_direct = span.get("direct_format") if isinstance(span.get("direct_format"), dict) else {}
+    span_effective = span.get("effective_format") if isinstance(span.get("effective_format"), dict) else span_direct
+    return {
+        "role": role,
+        "direct_format": {
+            "font": span_direct.get("font") if isinstance(span_direct.get("font"), dict) else {},
+            "paragraph": parent_direct.get("paragraph") if isinstance(parent_direct.get("paragraph"), dict) else {},
+        },
+        "effective_format": {
+            "font": span_effective.get("font") if isinstance(span_effective.get("font"), dict) else {},
+            "paragraph": parent_effective.get("paragraph") if isinstance(parent_effective.get("paragraph"), dict) else {},
+        },
+        "sample_text": str(span.get("text") or "")[:220],
+        "sample_paragraph_index": paragraph.get("index"),
+        "evidence_status": "direct_run",
+        "source": "visible Word metadata run within a source paragraph",
+    }
+
+
+def metadata_kind_for_text(text: str) -> str | None:
+    """Classify only explicit publication-metadata labels in front matter."""
+    normalized = " ".join(text.lower().split())
+    if re.match(r"^(?:doi\s*[:：]|https?://(?:dx\.)?doi\.org/)", normalized):
+        return "doi"
+    if re.match(
+        r"^(?:classification\b|classificat|article (?:id|number)\b|e?-?issn\b|coden\b|中图分类|文献标识|文章编号|分类号)",
+        normalized,
+    ):
+        return "publication_id"
+    if re.match(
+        r"^(?:received\b|accepted\b|revised\b|published online\b|publication date\b|submitted\b|收稿|修回|录用|出版日期|投稿日期)",
+        normalized,
+    ):
+        return "dates"
+    if re.match(r"^(?:funding\b|funded by\b|grant\b|supported by\b|基金|资助)", normalized):
+        return "funding"
+    if re.match(
+        r"^(?:author biography\b|author information\b|author contribution\b|correspondence\b|作者简介|作者信息|作者贡献|通信联系人|通讯作者)",
+        normalized,
+    ):
+        return "contributor_note"
+    if re.match(r"^(?:copyright\b|editorial note\b|editor's note\b|版权所有)", normalized):
+        return "editorial_note"
+    return None
+
+
+def metadata_style_evidence(docx_item: dict | None) -> dict:
+    """Group visible front-matter metadata by semantic type, never by one font.
+
+    A metadata paragraph is not a single role in the Word sense: DOI, funding,
+    dates, publication identifiers, and contributor notes are often adjacent
+    but deliberately use different typography.  This emits source-backed
+    subroles and leaves the untyped command on a documented default.
+    """
+    if not docx_item:
+        return {
+            "role": "metadata",
+            "evidence_status": "default",
+            "source": "no readable Word metadata evidence was available; use the documented generic metadata default",
+            "kind_styles": {},
+            "generic_style": role_evidence_or_default({}, "metadata_generic"),
+        }
+    inspection = docx_item.get("inspection", {})
+    paragraphs = [
+        item for item in inspection.get("paragraph_samples", [])
+        if isinstance(item, dict) and str(item.get("text") or "").strip()
+    ]
+    # Do not mine DOI strings from body references. The first non-affiliation
+    # heading is the conservative end of the article front-matter window.
+    heading_indexes = [
+        int(item.get("index") or 0)
+        for item in inspection.get("heading_candidates", [])
+        if isinstance(item, dict)
+        and int(item.get("index") or 0) > 5
+        and not is_affiliation_like(str(item.get("text") or ""))
+    ]
+    # A template without a defensible first body heading must not cause the
+    # extractor to scan arbitrary later references for DOI fields. Retain a
+    # bounded first-page/front-matter candidate window instead.
+    front_matter_end = min(heading_indexes) if heading_indexes else 40
+    kinds: dict[str, dict] = {}
+    for paragraph in paragraphs:
+        index = int(paragraph.get("index") or 0)
+        if index >= front_matter_end:
+            continue
+        text = str(paragraph.get("text") or "").strip()
+        kind = metadata_kind_for_text(text)
+        if not kind:
+            continue
+        # One type can occur more than once. Retain every sample index/text,
+        # but select the first visible line as the editable representative.
+        entry = kinds.get(kind)
+        if entry is None:
+            line_style = direct_paragraph_evidence(paragraph, f"metadata_{kind}")
+            spans = [item for item in paragraph.get("format_spans", []) if isinstance(item, dict) and str(item.get("text") or "").strip()]
+            label_span = next(
+                (
+                    span for span in spans
+                    if re.search(r"(?:[:：]\s*)$", str(span.get("text") or ""))
+                ),
+                None,
+            )
+            value_span = next((span for span in spans if span is not label_span), None)
+            entry = {
+                "role": f"metadata_{kind}",
+                "kind": kind,
+                "evidence_status": "source",
+                "source": "visible Word front-matter metadata line; grouped by explicit semantic label",
+                "line_style": line_style,
+                "label_style": format_span_evidence(paragraph, label_span, f"metadata_{kind}_label") if label_span else {},
+                "value_style": format_span_evidence(paragraph, value_span, f"metadata_{kind}_value") if value_span else line_style,
+                "sample_text": text[:220],
+                "sample_paragraph_indexes": [index],
+                "sample_texts": [text[:220]],
+            }
+            kinds[kind] = entry
+        else:
+            entry["sample_paragraph_indexes"].append(index)
+            entry["sample_texts"].append(text[:220])
+    if not kinds:
+        return {
+            "role": "metadata",
+            "evidence_status": "default",
+            "source": "no explicit metadata label was found before the first article heading; use the documented generic metadata default",
+            "kind_styles": {},
+            "generic_style": role_evidence_or_default({}, "metadata_generic"),
+        }
+    return {
+        "role": "metadata",
+        "evidence_status": "source",
+        "source": "visible Word metadata is source-backed but heterogeneous; map each semantic kind independently",
+        "front_matter_end_paragraph_index": front_matter_end,
+        "front_matter_window_source": (
+            "first non-affiliation Word heading" if heading_indexes
+            else "bounded first 40 Word paragraphs because no defensible body heading was found"
+        ),
+        "kind_styles": kinds,
+        "generic_style": role_evidence_or_default({}, "metadata_generic"),
+    }
 
 
 def latin_text_ratio(text: str) -> float:
@@ -2064,6 +2704,7 @@ def infer_line_spacing(
     docx_item: dict | None,
     evidence: str,
     columns: str,
+    language: str,
     body_override: dict | None = None,
 ) -> float:
     body = body_override or body_style_evidence(docx_item)
@@ -2080,6 +2721,8 @@ def infer_line_spacing(
         return 2.0
     if contains(evidence, "single-spacing", "single spacing", "single-spaced", "single spaced"):
         return 1.0
+    if language in {"zh", "mixed"}:
+        return 1.3
     return 1.0 if columns == "double" else 1.15
 
 
@@ -2222,7 +2865,7 @@ def infer_paragraph_indent(docx_item: dict | None, language: str) -> str:
             return f"{round(points, 1)}pt"
     except (TypeError, ValueError):
         pass
-    return "2em" if language == "zh" else "1.5em"
+    return "2em" if language in {"zh", "mixed"} else "1.5em"
 
 
 def section_numbering_evidence(docx_item: dict | None) -> dict:
@@ -2429,16 +3072,22 @@ def main() -> int:
     journal_name = args.journal_name or ("Ecological Indicators" if contains(evidence, "Ecological Indicators") else "Journal Template")
     publisher = args.publisher or ("Elsevier" if contains(evidence, "Elsevier") else "")
     columns = infer_columns(docx, evidence)
-    body_columns_start_after_front_matter = body_column_transition(docx, columns)
+    body_column_transition_info = body_column_transition_evidence(docx, columns)
+    body_columns_start_after_front_matter = body_column_transition_info.get("status") == "source"
     style_evidence = body_style_evidence(docx)
     abstract_style_evidence = role_evidence_or_default(role_style_evidence(docx, "abstract"), "abstract")
     keyword_style_evidence = role_evidence_or_default(role_style_evidence(docx, "keyword"), "keywords")
+    article_type_style_evidence = role_evidence_or_default(
+        role_style_evidence(docx, "article type", "article_type", "paper type", "manuscript type"),
+        "article_type",
+    )
     title_style_evidence = role_evidence_or_default(role_style_evidence(docx, "title"), "title")
     author_style_evidence = role_evidence_or_default(role_style_evidence(docx, "author"), "author")
     affiliation_style_evidence = role_evidence_or_default(
         role_style_evidence(docx, "affiliation", "address", "institution"),
         "affiliation",
     )
+    metadata_evidence = metadata_style_evidence(docx)
     table_caption_style_evidence = role_evidence_or_default(
         visible_caption_evidence(docx, "table") or role_style_evidence(docx, "table caption", "caption"),
         "table_caption",
@@ -2493,7 +3142,9 @@ def main() -> int:
         figure_caption_evidence,
     )
     float_spacing_evidence = float_text_spacing_evidence(table_layout, figure_layout)
+    page_numbering = page_numbering_evidence(docx)
     equation_layout = equation_layout_evidence(docx)
+    block_decorations = block_decoration_evidence(docx)
     list_layout = list_layout_evidence(docx)
     footnote_style = footnote_style_evidence(docx)
     endnote_style = endnote_style_evidence(docx)
@@ -2501,11 +3152,30 @@ def main() -> int:
     endnote_count = int(docx.get("inspection", {}).get("endnote_count", 0) or 0) if docx else 0
     footnote_numbering = docx.get("inspection", {}).get("footnote_numbering", {}) if docx else {}
     endnote_numbering = docx.get("inspection", {}).get("endnote_numbering", {}) if docx else {}
+    note_sections = docx.get("inspection", {}).get("sections", []) if docx else []
+    footnote_section_overrides = [
+        {"section_index": section.get("index"), **section.get("footnote_numbering", {})}
+        for section in note_sections if isinstance(section, dict) and isinstance(section.get("footnote_numbering"), dict) and section.get("footnote_numbering")
+    ]
+    endnote_section_overrides = [
+        {"section_index": section.get("index"), **section.get("endnote_numbering", {})}
+        for section in note_sections if isinstance(section, dict) and isinstance(section.get("endnote_numbering"), dict) and section.get("endnote_numbering")
+    ]
     footnote_references = docx.get("inspection", {}).get("footnote_references", []) if docx else []
     endnote_references = docx.get("inspection", {}).get("endnote_references", []) if docx else []
     cover = cover_evidence(docx)
     toc = toc_evidence(docx)
     line_numbering = line_number_evidence(docx, evidence)
+    tab_stop_layout = tab_stop_layout_evidence(docx)
+    drop_cap_layout = drop_cap_layout_evidence(docx)
+    character_effects = character_effect_evidence(docx)
+    character_styles = character_style_evidence(docx)
+    text_grid = text_grid_evidence(docx)
+    script_languages = script_language_evidence(docx)
+    paragraph_directions = paragraph_direction_evidence(docx)
+    paragraph_break_policies = paragraph_break_policy_evidence(docx)
+    theme_formats = theme_format_evidence(docx)
+    unmodeled_properties = unmodeled_format_property_evidence(docx)
     fallbacks = inaccessible_word_fallbacks(inventory, inventory_path)
     content_controls = docx.get("inspection", {}).get("content_controls", []) if docx else []
     comments_evidence = docx.get("inspection", {}).get("comments", []) if docx else []
@@ -2527,14 +3197,50 @@ def main() -> int:
 
     references_evidence = reference_style_evidence(docx, evidence)
     references_style = references_evidence["style"]
-    abstract_limit = 250 if contains(notes, "250 words") else 400 if contains(evidence, "400 words") else None
-    keyword_max = 7 if contains(notes, "1 to 7 keywords", "1 to 7") else 6 if contains(evidence, "maximum of six keywords") else None
+    abstract_limit_evidence = infer_abstract_length_limit(notes, evidence)
+    abstract_limit = abstract_limit_evidence.get("value")
+    keyword_limit_evidence = infer_keyword_count_limit(notes, evidence)
+    keyword_min = keyword_limit_evidence.get("minimum")
+    keyword_max = keyword_limit_evidence.get("maximum")
+
+    if language == "zh":
+        abstract_limit_fallback = "Chinese default: concise Chinese abstract without a hard word limit in LaTeX."
+    elif language == "mixed":
+        abstract_limit_fallback = "Chinese/mixed-language default: concise source-language abstract blocks without a hard word limit in LaTeX."
+    else:
+        abstract_limit_fallback = "English default: concise abstract without hard word limit in LaTeX."
+    keyword_limit_fallback = (
+        "Chinese default: concise keyword list without a hard count limit in LaTeX."
+        if language == "zh"
+        else "Chinese/mixed-language default: concise source-language keyword lists without a hard count limit in LaTeX."
+        if language == "mixed"
+        else "English default: concise keyword list without a hard count limit in LaTeX."
+    )
 
     if abstract_limit is None:
+        limit_status = str(abstract_limit_evidence.get("status") or "not_observable")
+        missing_requirement = (
+            "Conflicting abstract length limits were found in official notes or template text; no value was selected."
+            if limit_status == "ambiguous"
+            else "No abstract length limit found in official notes or template text."
+        )
         fallbacks.append({
             "area": "abstracts.word_limit",
-            "missing_requirement": "No abstract word limit found in official notes or template text.",
-            "fallback_used": "English default: concise abstract without hard word limit in LaTeX.",
+            "missing_requirement": missing_requirement,
+            "fallback_used": abstract_limit_fallback,
+            "source_checked": str(inventory_path),
+            "latex_location": "main.tex",
+        })
+    if keyword_max is None:
+        keyword_status = str(keyword_limit_evidence.get("status") or "not_observable")
+        fallbacks.append({
+            "area": "keywords.count_limit",
+            "missing_requirement": (
+                "Conflicting keyword count limits were found in official notes or template text; no value was selected."
+                if keyword_status == "ambiguous"
+                else "No keyword count limit found in official notes or template text."
+            ),
+            "fallback_used": keyword_limit_fallback,
             "source_checked": str(inventory_path),
             "latex_location": "main.tex",
         })
@@ -2545,6 +3251,125 @@ def main() -> int:
             "fallback_used": "Generated an editable numbered LaTeX equation fixture; verify display and number placement against a rendered source page.",
             "source_checked": str(inventory_path),
             "latex_location": "journal-template.cls / main.tex",
+        })
+    if block_decorations.get("present"):
+        fallbacks.append({
+            "area": "page.block_decorations",
+            "missing_requirement": "Word paragraph borders, shading, or frames need a source-specific editable LaTeX block design.",
+            "fallback_used": "Recorded each decorated Word paragraph; no generic colored/framed box was enabled automatically.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex",
+        })
+    if page_numbering.get("present"):
+        fallbacks.append({
+            "area": "page.numbering",
+            "missing_requirement": "Word page-number format and restart settings need a confirmed LaTeX manuscript boundary.",
+            "fallback_used": "Wrote source-labeled journalpagenumbering candidates without applying them automatically.",
+            "source_checked": str(inventory_path),
+            "latex_location": "page-numbering.tex / journal-template.cls / main.tex",
+        })
+    line_number_sections = line_numbering.get("sections") if isinstance(line_numbering.get("sections"), list) else []
+    line_number_missing = sorted({
+        key
+        for section in line_number_sections if isinstance(section, dict)
+        for key in ("count_by", "start", "distance_twips", "restart")
+        if section.get(key) in {None, ""} and key not in (section.get("implicit_defaults") or {})
+    })
+    if line_numbering.get("status") == "source" and line_number_missing:
+        fallbacks.append({
+            "area": "body.line_number_evidence",
+            "missing_requirement": "Word line-numbering system omits explicit " + ", ".join(line_number_missing) + " value(s).",
+            "fallback_used": "Retained the observed section policy and wrote a manual line-numbering candidate; no missing parameter was silently inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "line-numbering.tex / journal-template.cls / main.tex",
+        })
+    if toc.get("enabled") and toc.get("entry_tab_stops"):
+        fallbacks.append({
+            "area": "body.toc_evidence.entry_tab_stops",
+            "missing_requirement": "Word TOC right-tab, leader, and indentation need source-specific LaTeX TOC layout settings.",
+            "fallback_used": "Preserved the entry tab-stop evidence; standard LaTeX TOC layout remains unverified.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex",
+        })
+    if tab_stop_layout.get("enabled"):
+        fallbacks.append({
+            "area": "body.tab_stop_evidence",
+            "missing_requirement": "Visible Word tab-stop layouts need a role-specific LaTeX mapping.",
+            "fallback_used": "Preserved every observed non-TOC tab-stop sample; no global tab layout was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / tab-stops.tex",
+        })
+    if drop_cap_layout.get("enabled"):
+        fallbacks.append({
+            "area": "body.drop_cap_evidence",
+            "missing_requirement": "Word drop-cap geometry and its following text need a source-specific LaTeX mapping.",
+            "fallback_used": "Preserved the drop-cap paragraph and adjacent-body evidence; no oversized first letter was inserted automatically.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / drop-caps.tex",
+        })
+    if character_effects.get("enabled"):
+        fallbacks.append({
+            "area": "body.character_effect_evidence",
+            "missing_requirement": "Visible Word local character effects need role-specific LaTeX mapping.",
+            "fallback_used": "Preserved source spans in character-effects.tex; no global small-caps, highlight, shading, text-border, kerning, spacing, scale, or hidden-text rule was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / character-effects.tex",
+        })
+    if character_styles.get("enabled"):
+        fallbacks.append({
+            "area": "body.character_style_evidence",
+            "missing_requirement": "Word runs referencing named character styles need source-role-specific LaTeX mapping.",
+            "fallback_used": "Preserved character style IDs, resolved effective formatting, and source spans in character-styles.tex; no global font or color rule was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / character-styles.tex",
+        })
+    if text_grid.get("enabled"):
+        fallbacks.append({
+            "area": "page.text_grid_evidence",
+            "missing_requirement": "Word document-grid and local grid-override behavior need source-specific CJK/LaTeX line-grid mapping.",
+            "fallback_used": "Preserved section docGrid and paragraph/style grid properties in text-grid.tex; no fixed LaTeX baseline-grid approximation was enabled automatically.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / text-grid.tex",
+        })
+    if script_languages.get("present"):
+        fallbacks.append({
+            "area": "source_annotations.script_language_evidence",
+            "missing_requirement": "Word run language, complex-script emphasis, and RTL direction need source-role-specific LaTeX engine/font/direction mapping.",
+            "fallback_used": "Preserved bounded role-local evidence in script-language.tex with raw span boundaries in source_inventory.json; no global language, font, or RTL package policy was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / script-language.tex",
+        })
+    if paragraph_directions.get("enabled"):
+        fallbacks.append({
+            "area": "body.paragraph_direction_evidence",
+            "missing_requirement": "Word paragraph bidi and text-direction policy need source-role-specific LaTeX alignment, indentation, and direction mapping.",
+            "fallback_used": "Preserved bounded paragraph-direction evidence in paragraph-direction.tex with raw paragraph records in source_inventory.json; no document-wide RTL or vertical-writing policy was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / paragraph-direction.tex",
+        })
+    if paragraph_break_policies.get("enabled"):
+        fallbacks.append({
+            "area": "body.paragraph_break_policy_evidence",
+            "missing_requirement": "Word automatic-hyphen and word-wrap overrides need role-specific LaTeX break-policy mapping and same-content flow verification.",
+            "fallback_used": "Preserved bounded break-policy evidence in paragraph-break-policy.tex with raw paragraph records in source_inventory.json; no global hyphenation or wrapping switch was inferred.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / paragraph-break-policy.tex",
+        })
+    if theme_formats.get("present"):
+        fallbacks.append({
+            "area": "source_annotations.theme_format_evidence",
+            "missing_requirement": "Word theme colors/fonts used by visible runs or styles need source-role-specific LaTeX mapping.",
+            "fallback_used": "Preserved theme definitions and use sites in word-theme.tex; no global color or font selection was inferred from Word theme aliases.",
+            "source_checked": str(inventory_path),
+            "latex_location": "journal-template.cls / main.tex / word-theme.tex",
+        })
+    if unmodeled_properties.get("present"):
+        fallbacks.append({
+            "area": "source_annotations.unmodeled_format_properties",
+            "missing_requirement": "Word contains format-property nodes not yet modeled by the current direct-format extractor.",
+            "fallback_used": "Wrote a source-labeled unmodeled-word-properties.json inventory; classify each property before a full-fidelity claim.",
+            "source_checked": str(inventory_path),
+            "latex_location": "unmodeled-word-properties.json / journal-template.cls / main.tex",
         })
     if list_layout.get("present"):
         fallbacks.append({
@@ -2585,6 +3410,7 @@ def main() -> int:
         else abstract_style_evidence
     )
     front_matter_boundaries = {
+        "article_type_to_title": front_matter_boundary_evidence(article_type_style_evidence, title_style_evidence, 6),
         "title_to_author": front_matter_boundary_evidence(title_style_evidence, author_style_evidence, 8),
         "author_to_affiliation": front_matter_boundary_evidence(author_style_evidence, affiliation_style_evidence, 6),
         "affiliation_to_abstract": front_matter_boundary_evidence(affiliation_style_evidence, abstract_entry_style, 12),
@@ -2606,6 +3432,9 @@ def main() -> int:
         },
         "source_annotations": {
             "content_controls": content_controls[:80],
+            "unmodeled_format_properties": unmodeled_properties,
+            "script_language_evidence": script_languages,
+            "theme_format_evidence": theme_formats,
             "comments": comments_evidence[:40],
             "comment_format_directives": [body_comment_directive] if body_comment_directive else [],
             "instruction": (
@@ -2634,8 +3463,11 @@ def main() -> int:
             "representative_section_index": representative_page_section.get("index") if representative_page_section else None,
             "representative_section_source": "most frequent manuscript-body Word section frame",
             "section_flow": section_flow_evidence(docx),
-            "line_spacing": infer_line_spacing(docx, evidence, columns, style_evidence),
+            "numbering": page_numbering,
+            "text_grid_evidence": text_grid,
+            "line_spacing": infer_line_spacing(docx, evidence, columns, language, style_evidence),
             "body_paragraph_spacing_evidence": body_paragraph_spacing_evidence(evidence),
+            "block_decorations": block_decorations,
             "paragraph_indent": infer_paragraph_indent(docx, language),
             "column_sep_mm": infer_column_sep_mm(docx, columns),
             "column_widths_twips": column_widths_twips,
@@ -2650,11 +3482,14 @@ def main() -> int:
             "float_spacing_evidence": float_spacing_evidence,
         },
         "front_matter": {
+            "article_type": article_type_style_evidence.get("evidence_status") != "default",
+            "article_type_style": article_type_style_evidence,
             "title": True,
             "authors": True,
             "affiliations": True,
             "corresponding_author": True,
             "body_column_transition_after_front_matter": body_columns_start_after_front_matter,
+            "column_transition_evidence": body_column_transition_info,
             "present_address_footnotes": contains(evidence, "present address", "permanent address"),
             "highlights": contains(evidence, "highlights"),
             "highlights_guidance": highlight_guidance,
@@ -2666,6 +3501,7 @@ def main() -> int:
             "author_style": author_style_evidence,
             "author_layout": author_layout_evidence(author_style_evidence),
             "affiliation_style": affiliation_style_evidence,
+            "metadata_style": metadata_evidence,
             "english_title_style": role_evidence_or_default(english_front_matter_styles.get("title", {}), "english_title"),
             "english_author_style": role_evidence_or_default(english_front_matter_styles.get("author", {}), "english_author"),
             "english_affiliation_style": role_evidence_or_default(english_front_matter_styles.get("affiliation", {}), "english_affiliation"),
@@ -2678,7 +3514,11 @@ def main() -> int:
             "chinese": language in {"zh", "mixed"},
             "keywords": True,
             "word_limit": abstract_limit,
+            "word_limit_unit": abstract_limit_evidence.get("unit"),
+            "word_limit_evidence": abstract_limit_evidence,
+            "keyword_min": keyword_min,
             "keyword_max": keyword_max,
+            "keyword_count_evidence": keyword_limit_evidence,
             "source_text": " ".join(abstract_guidance[:2]) if abstract_guidance else None,
             "english_source_text": (
                 " ".join(english_abstract_guidance[:2])
@@ -2706,6 +3546,12 @@ def main() -> int:
             "toc_depth": toc.get("depth"),
             "line_numbers": line_numbering["enabled"],
             "line_number_evidence": line_numbering,
+            "tab_stop_evidence": tab_stop_layout,
+            "drop_cap_evidence": drop_cap_layout,
+            "character_effect_evidence": character_effects,
+            "character_style_evidence": character_styles,
+            "paragraph_direction_evidence": paragraph_directions,
+            "paragraph_break_policy_evidence": paragraph_break_policies,
             "sections": sections,
             "content_box": content_box_evidence(style_evidence),
             "keyword_content_box": content_box_evidence(keyword_style_evidence),
@@ -2721,6 +3567,7 @@ def main() -> int:
             "caption_style": table_caption_style_evidence,
             "note_style": table_note_style_evidence,
             "layout_evidence": table_layout,
+            "style_evidence": docx.get("inspection", {}).get("table_style_evidence", []) if docx else [],
         },
         "figures": {
             "caption_position": figure_caption_position,
@@ -2744,7 +3591,7 @@ def main() -> int:
             "enabled": bool(footnote_style) or bool(footnote_references),
             "style": footnote_style,
             "marker_style": footnote_numbering.get("marker_style", "source-not-extracted"),
-            "marker_evidence": footnote_numbering,
+            "marker_evidence": {**footnote_numbering, "section_overrides": footnote_section_overrides},
             "reference_evidence": footnote_references[:40],
             "count_in_template": footnote_count,
         },
@@ -2752,8 +3599,8 @@ def main() -> int:
             "enabled": bool(endnote_style) or bool(endnote_references),
             "style": endnote_style,
             "count_in_template": endnote_count,
-            "placement": "source-not-extracted",
-            "marker_evidence": endnote_numbering,
+            "placement": (endnote_section_overrides[0].get("position") if endnote_section_overrides else endnote_numbering.get("position")) or "source-not-extracted",
+            "marker_evidence": {**endnote_numbering, "section_overrides": endnote_section_overrides},
             "reference_evidence": endnote_references[:40],
         },
         "appendices": {
@@ -2777,6 +3624,7 @@ def main() -> int:
     }
 
     output = Path(args.output).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
     print(output)
     return 0

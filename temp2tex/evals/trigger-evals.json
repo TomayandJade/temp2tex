@@ -16,6 +16,30 @@
     "should_trigger": true
   },
   {
+    "query": "The journal site has a legacy .doc author template and a separate submission guide, but no usable LaTeX download. Rebuild the formatting as an Overleaf-ready class and keep uncertain rules in a gap log.",
+    "should_trigger": true
+  },
+  {
+    "query": "I received an official .dotx template for a Chinese-English journal. Please preserve its title page, bilingual abstract, heading hierarchy, table captions, and bibliography layout in XeLaTeX.",
+    "should_trigger": true
+  },
+  {
+    "query": "Can you turn this publisher Word template plus artwork instructions into a reusable journal-template.cls? I need a template package, not a one-off conversion of the example article.",
+    "should_trigger": true
+  },
+  {
+    "query": "Our target journal publishes only a Word submission form, sample PDF, and online author instructions. I need an editable LaTeX starter with a documented English default wherever the official material is silent.",
+    "should_trigger": true
+  },
+  {
+    "query": "The official author template is a macro-enabled .docm file with first-page correspondence notes, table rules, and appendices. Reconstruct it for Overleaf and record which details need later PDF verification.",
+    "should_trigger": true
+  },
+  {
+    "query": "Please audit this LaTeX journal template that was reconstructed from an official Word source. Check each visible Word role, including figures, captions, tables, notes, and running headers, before saying it matches.",
+    "should_trigger": true
+  },
+  {
     "query": "Please polish the English in my journal abstract without changing its structure.",
     "should_trigger": false
   },
@@ -29,6 +53,30 @@
   },
   {
     "query": "Convert this scanned article PDF into searchable text and summarize it.",
+    "should_trigger": false
+  },
+  {
+    "query": "Convert my completed 40-page thesis DOCX into LaTeX while preserving all prose and citations. There is no journal template involved.",
+    "should_trigger": false
+  },
+  {
+    "query": "The publisher already gave me an official .cls file. Help me put my manuscript into that existing LaTeX class.",
+    "should_trigger": false
+  },
+  {
+    "query": "Make a Microsoft Word author template from this existing LaTeX conference class so my collaborators can edit it in Word.",
+    "should_trigger": false
+  },
+  {
+    "query": "Extract the three tables from this supplementary PDF and write them as LaTeX tabular environments for my current paper.",
+    "should_trigger": false
+  },
+  {
+    "query": "Compare two draft manuscript PDFs and tell me which version has better figure placement. They are not journal-template references.",
+    "should_trigger": false
+  },
+  {
+    "query": "Design a polished bilingual Word resume template with a cover page, tables, and footnotes.",
     "should_trigger": false
   }
 ]

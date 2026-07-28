@@ -21,6 +21,12 @@ from docx.oxml.ns import qn
 from docx.shared import Inches
 
 
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+V_NS = "urn:schemas-microsoft-com:vml"
+
+
 TITLE = "Temp2TeX Regression Benchmark: Template Fidelity Across Journal Formats"
 ABSTRACT = (
     "This benchmark manuscript is intentionally structured to exercise journal template behavior. "
@@ -110,6 +116,86 @@ CJK_LATEX_DEFAULT = {
     "appendix_title": "A 附录验证样稿",
     "appendix_intro": "官方源文件未提供附录证据，此可编辑样稿用于验证附录计数器。",
 }
+
+
+def fixture_anchor_contract(
+    fixture_language: str,
+    fixture_profile: str,
+    *,
+    full_document_ready: bool = True,
+    limitation: str | None = None,
+) -> dict:
+    """Return the explicit same-content contract for a generated fixture.
+
+    The PDF profiler must never assume that a Chinese or bilingual fixture uses
+    the English stress-body phrases. These are deliberately short, unique
+    strings that occur in both render paths; they are verification metadata,
+    not inferred journal rules.
+    """
+    fixture_language = str(fixture_language or "en").lower()
+    fixture_profile = str(fixture_profile or "stress").lower()
+    if fixture_language in {"zh", "mixed"} and fixture_profile == "latex-default":
+        anchors = {
+            "title": ["中文论文标题"],
+            "abstract_zh": ["请在此填写中文摘要"],
+            "keywords_zh": ["关键词一"],
+            "title_en": ["English Title of the Manuscript"],
+            "abstract_en": ["Replace with the English abstract"],
+            "introduction": ["此可编辑样稿用于检查正文"],
+            "heading_level_two": ["检查二级标题的间距"],
+            "table_caption": ["带表注的示例表"],
+            "table_note": ["示例表注"],
+            "figure_caption": ["示例图片占位符"],
+            "results": ["参见表 1、图 1"],
+            "references": ["Sample reference placeholder"],
+            "appendix": ["官方源文件未提供附录证据"],
+        }
+        if not full_document_ready:
+            anchors = {
+                name: anchors[name]
+                for name in (
+                    "title", "abstract_zh", "keywords_zh", "title_en",
+                    "abstract_en", "introduction", "heading_level_two",
+                )
+            }
+        return {
+            "version": "fixture-anchor-cjk-latex-default-v2",
+            "scope": "full_document" if full_document_ready else "partial_zone",
+            "fixture_language": fixture_language,
+            "fixture_profile": fixture_profile,
+            "comparison_limitations": [] if full_document_ready else [
+                limitation or "The Word source has no observable table or body-artwork object; injected default floats cannot calibrate the whole class."
+            ],
+            "anchors": anchors,
+        }
+    anchors = {
+        "title": ["Temp2TeX Regression", "Template Fidelity"],
+        "abstract": ["This benchmark", "template behavior"],
+        "keywords": ["template conversion", "regression testing"],
+        "introduction": ["The regression body verifies", "converted template preserves"],
+        "methods": ["The method section includes", "Equation (1) should"],
+        "table": ["Expected stress", "merged-cell behavior"],
+        "figure": ["Single-panel figure", "subfigure regression"],
+        "acknowledgements": ["The authors thank the template maintainers"],
+        "data_availability": ["All data in this manuscript are placeholders"],
+        "references": ["Template regression testing", "Journal Formatting Methods"],
+        "appendix": ["Appendix Regression Checks", "appendix verifies"],
+    }
+    if not full_document_ready:
+        anchors = {
+            name: anchors[name]
+            for name in ("title", "abstract", "keywords", "introduction", "methods")
+        }
+    return {
+        "version": "fixture-anchor-en-stress-v2",
+        "scope": "full_document" if full_document_ready else "partial_zone",
+        "fixture_language": fixture_language,
+        "fixture_profile": fixture_profile,
+        "comparison_limitations": [] if full_document_ready else [
+            limitation or "The Word source has no observable table or body-artwork object; injected default floats cannot calibrate the whole class."
+        ],
+        "anchors": anchors,
+    }
 
 
 def normalize_name(value: str) -> str:
@@ -331,7 +417,7 @@ def materialize_inherited_page_furniture(doc: Document) -> dict:
 
 
 def front_matter_column_transition(doc: Document) -> dict:
-    """Capture an explicit continuous one-column to two-column transition."""
+    """Capture the first explicit one-column to two-column section transition."""
     sections = list(doc._element.body.xpath(".//w:sectPr"))
 
     def column_count(section) -> int:
@@ -348,12 +434,13 @@ def front_matter_column_transition(doc: Document) -> dict:
         following = sections[index + 1]
         break_node = current.find(qn("w:type"))
         break_type = break_node.get(qn("w:val")) if break_node is not None else "nextPage"
-        if column_count(current) == 1 and column_count(following) == 2 and break_type == "continuous":
+        if column_count(current) == 1 and column_count(following) == 2:
             return {
                 "available": True,
                 "source_section_index": index + 1,
                 "following_section_index": index + 2,
                 "break_type": break_type,
+                "latex_mode": "continuous" if break_type == "continuous" else "new_page",
                 "from_columns": 1,
                 "to_columns": 2,
                 "sectPr": copy.deepcopy(current),
@@ -467,7 +554,15 @@ def add_placeholder_figure(
     caption: str | None = None,
     label: str | None = None,
     label_separator: str = ". ",
+    width_inches: float | None = None,
+    height_inches: float | None = None,
 ) -> None:
+    fixture_sizes = getattr(doc, "_temp2tex_fixture_figure_sizes", {})
+    fixture_size = fixture_sizes.get(path.name) if isinstance(fixture_sizes, dict) else None
+    if fixture_size and width_inches is None:
+        width_inches = fixture_size[0]
+    if fixture_size and height_inches is None:
+        height_inches = fixture_size[1]
     try:
         from PIL import Image, ImageDraw
 
@@ -485,13 +580,55 @@ def add_placeholder_figure(
         image.save(path)
         paragraph = doc.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        paragraph.add_run().add_picture(str(path), width=Inches(4.7))
+        picture_kwargs = {"width": Inches(width_inches if width_inches is not None else 4.7)}
+        if height_inches is not None:
+            picture_kwargs["height"] = Inches(height_inches)
+        paragraph.add_run().add_picture(str(path), **picture_kwargs)
     except Exception:
         add_paragraph(doc, "[Temp2TeX regression figure placeholder]", style)
     caption = caption or ("Two-panel figure placeholder used for subfigure regression" if paired else "Single-panel figure placeholder used for layout regression")
     caption_label = label or ("图" if caption.startswith("示例") else "Figure")
     number = "" if label else f" {'2' if paired else '1'}"
     add_paragraph(doc, f"{caption_label}{number}{label_separator}{caption}", style)
+
+
+def source_body_object_evidence(doc: Document) -> dict:
+    """Count source objects without mistaking anchored artwork for absent evidence.
+
+    ``python-docx`` exposes only inline shapes.  Word templates often keep
+    figures as DrawingML anchors, while VML image fallbacks occur in older
+    files.  Count only image-bearing drawing containers here: a text box,
+    rule, or other non-image decoration is not evidence for the generic figure
+    fixture used in a full-document PDF comparison.
+    """
+    body = doc.element.body
+    table_tag = f"{{{W_NS}}}tbl"
+    inline_tag = f"{{{WP_NS}}}inline"
+    anchor_tag = f"{{{WP_NS}}}anchor"
+    blip_tag = f"{{{A_NS}}}blip"
+    vml_image_tag = f"{{{V_NS}}}imagedata"
+    tables = sum(1 for node in body.iter() if node.tag == table_tag)
+    inline_images = 0
+    anchored_images = 0
+    for node in body.iter():
+        if node.tag not in {inline_tag, anchor_tag}:
+            continue
+        if any(child.tag == blip_tag for child in node.iter()):
+            if node.tag == inline_tag:
+                inline_images += 1
+            else:
+                anchored_images += 1
+    vml_images = sum(1 for node in body.iter() if node.tag == vml_image_tag)
+    figure_count = inline_images + anchored_images + vml_images
+    return {
+        "table_count": tables,
+        "inline_image_count": inline_images,
+        "anchored_image_count": anchored_images,
+        "vml_image_count": vml_images,
+        "figure_object_count": figure_count,
+        "full_document_comparison_ready": bool(tables and figure_count),
+        "rule": "A full-document fixture contract needs observable Word evidence for both tables and body image objects, or an independently verified shared structural fixture.",
+    }
 
 
 def build_normalized_document(
@@ -502,6 +639,7 @@ def build_normalized_document(
     fixture_profile: str = "stress",
 ) -> dict:
     doc = Document(str(source_docx))
+    source_objects = source_body_object_evidence(doc)
     is_cjk = fixture_language in {"zh", "mixed"}
     latex_default_cjk = is_cjk and fixture_profile == "latex-default"
     title = CJK_LATEX_DEFAULT["title"] if latex_default_cjk else (CJK_TITLE if is_cjk else TITLE)
@@ -516,7 +654,6 @@ def build_normalized_document(
             ("1 模板验证样稿", CJK_LATEX_DEFAULT["intro"]),
             ("2 公式、表格与图片", ""),
             ("3 结果", CJK_LATEX_DEFAULT["result"]),
-            ("4 列表验证", ""),
         ]
         second_level_text = CJK_LATEX_DEFAULT["second_check"]
         third_level_text = CJK_LATEX_DEFAULT["third_check"]
@@ -525,6 +662,22 @@ def build_normalized_document(
     tables_heading = "2 公式、表格与图片" if latex_default_cjk else ("公式、表格与图片" if is_cjk else "Tables and Figures")
     methods_heading = "方法" if is_cjk else "Methods"
     results_heading = "3 结果" if latex_default_cjk else ("结果" if is_cjk else "Results")
+    cjk_primary_figure_size = None
+    cjk_appendix_figure_size = None
+    if latex_default_cjk and doc.sections:
+        # Match the generated editable CJK fixture: a full text-width 35 mm
+        # primary frame and a 45%-width 12 mm appendix frame. These are
+        # fixture geometry, not inferred journal artwork requirements.
+        section = doc.sections[0]
+        body_width_inches = (
+            section.page_width - section.left_margin - section.right_margin
+        ) / 914400
+        cjk_primary_figure_size = (body_width_inches, 35 / 25.4)
+        cjk_appendix_figure_size = (body_width_inches * 0.45, 12 / 25.4)
+        doc._temp2tex_fixture_figure_sizes = {
+            figure_path.name: cjk_primary_figure_size,
+            "appendix-figure-placeholder.png": cjk_appendix_figure_size,
+        }
     original_section_count = len(doc.sections)
     inherited_page_furniture = materialize_inherited_page_furniture(doc)
     column_transition = front_matter_column_transition(doc)
@@ -534,6 +687,25 @@ def build_normalized_document(
     styles = infer_styles(doc)
     style_names = {role: style.name if style is not None else None for role, style in styles.items()}
     direct_sources = direct_role_samples(doc)
+    visible_paragraphs = [paragraph for paragraph in doc.paragraphs if paragraph.text.strip()]
+
+    def next_visible_paragraph(source):
+        if source is None:
+            return None
+        for index, paragraph in enumerate(visible_paragraphs):
+            if paragraph._p is source._p:
+                return visible_paragraphs[index + 1] if index + 1 < len(visible_paragraphs) else None
+        return None
+
+    abstract_label_source = direct_sources.get("abstract")
+    abstract_label_text = abstract_label_source.text.strip().rstrip(":：") if abstract_label_source is not None else ""
+    abstract_is_separate_label = abstract_label_text.lower() in {"abstract", "摘要", "中文摘要", "英文摘要"}
+    abstract_content_source = next_visible_paragraph(abstract_label_source) if abstract_is_separate_label else None
+    if abstract_is_separate_label:
+        for prefix in (f"{abstract_label_text}:", f"{abstract_label_text}："):
+            if abstract.lower().startswith(prefix.lower()):
+                abstract = abstract[len(prefix):].lstrip()
+                break
     clear_body(doc)
     direct_copy_decisions: dict[str, str] = {}
 
@@ -560,7 +732,15 @@ def build_normalized_document(
     if latex_default_cjk:
         affiliation_paragraph = add_role("affiliation", CJK_LATEX_DEFAULT["affiliation_2"])
     transition_attached = attach_section_break(affiliation_paragraph, column_transition)
-    add_role("abstract", abstract)
+    if abstract_is_separate_label and abstract_content_source is not None:
+        # A standalone Word label and its following content paragraph carry
+        # distinct run/paragraph formatting. Preserve that split in the fixed
+        # regression manuscript instead of inheriting label boldness or
+        # spacing across the abstract body.
+        add_paragraph(doc, abstract_label_text, styles["abstract"], abstract_label_source)
+        add_paragraph(doc, abstract, styles["abstract"], abstract_content_source)
+    else:
+        add_role("abstract", abstract)
     add_role("keywords", keywords)
     if fixture_language == "mixed":
         add_role("title", CJK_LATEX_DEFAULT["english_title"] if latex_default_cjk else "English Title of the Regression Manuscript")
@@ -620,10 +800,6 @@ def build_normalized_document(
             # used by the LaTeX stress body.
             paragraph.text = results_text
             paragraph.style = styles["body"]
-        if latex_default_cjk and heading == "4 列表验证":
-            add_role("body", "1. 请替换为可编辑的列表项。")
-            add_role("body", "2. 请与原模板对照列表缩进。")
-
     if not latex_default_cjk:
         add_role("heading1", "致谢" if is_cjk else "Acknowledgements")
         add_role("body", "感谢模板维护人员。本样稿不涉及外部经费。" if is_cjk else "The authors thank the template maintainers. No external funding was used.")
@@ -673,6 +849,7 @@ def build_normalized_document(
         "direct_format_roles": [role for role, paragraph in direct_sources.items() if paragraph is not None],
         "direct_format_copy_decisions": direct_copy_decisions,
         "original_table_style": original_table_style,
+        "source_object_evidence": source_objects,
         "warnings": warnings,
     }
 
@@ -684,6 +861,10 @@ def main() -> int:
     parser.add_argument("--report", required=True)
     parser.add_argument("--fixture-language", choices=["en", "zh", "mixed"], default="en")
     parser.add_argument("--fixture-profile", choices=["stress", "latex-default"], default="stress")
+    parser.add_argument(
+        "--anchors-output",
+        help="Write the language- and profile-specific same-content anchor contract used for PDF comparison.",
+    )
     args = parser.parse_args()
 
     source = Path(args.source).expanduser().resolve()
@@ -706,6 +887,36 @@ def main() -> int:
                     report.update(build_normalized_document(source_docx, output, output.parent / "figure-placeholder.png", args.fixture_language, args.fixture_profile))
         except Exception as exc:
             report["error"] = f"{type(exc).__name__}: {exc}"
+    if args.anchors_output:
+        anchor_path = Path(args.anchors_output).expanduser().resolve()
+        anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        source_objects = report.get("source_object_evidence", {})
+        full_document_ready = bool(source_objects.get("full_document_comparison_ready"))
+        limitation = None
+        if not full_document_ready:
+            limitation = (
+                "The official Word source exposes {tables} table(s) and {figures} body image object(s) "
+                "({inline} inline, {anchored} anchored, {vml} VML); "
+                "the injected table/figure fixture is limited to local diagnostics until both render paths share a verified structural contract."
+            ).format(
+                tables=source_objects.get("table_count", 0),
+                figures=source_objects.get("figure_object_count", 0),
+                inline=source_objects.get("inline_image_count", 0),
+                anchored=source_objects.get("anchored_image_count", 0),
+                vml=source_objects.get("vml_image_count", 0),
+            )
+        contract = fixture_anchor_contract(
+            args.fixture_language,
+            args.fixture_profile,
+            full_document_ready=full_document_ready,
+            limitation=limitation,
+        )
+        anchor_path.write_text(json.dumps(contract, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        report["anchor_contract"] = {
+            "path": str(anchor_path),
+            "version": contract["version"],
+            "scope": contract["scope"],
+        }
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(report_path)

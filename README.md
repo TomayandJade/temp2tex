@@ -4,50 +4,53 @@
 
 ### Overview
 
-`temp2tex` is a Codex skill for reconstructing an editable LaTeX journal
-template from an official non-LaTeX author template, primarily Microsoft Word
-files, together with supporting publisher material.
+`temp2tex` is a Codex skill for rebuilding an editable LaTeX journal-template
+package from an official non-LaTeX author template, especially a Microsoft
+Word template, together with available publisher guidance.
 
-It is designed to guide an agent through evidence-based reconstruction rather
-than produce a one-shot conversion. The target is a maintainable journal
-template package, normally centred on `journal-template.cls` and `main.tex`.
+The skill guides an agent through evidence-led reconstruction. Its default
+output is a maintainable package centred on `journal-template.cls` and
+`main.tex`, with source evidence, recorded defaults, and unresolved gaps kept
+separate from publisher requirements.
 
-### Supported Sources
+### Capabilities
 
-- Word templates: `.doc`, `.docx`, `.docm`, `.dot`, `.dotx`, and `.dotm`
-- Official author instructions, reference rules, artwork guidance, and journal
-  web pages
-- Official sample PDFs or published samples when they provide relevant layout
-  evidence
+- Inspect `.doc`, `.docx`, `.docm`, `.dot`, `.dotx`, `.dotm`, and `.rtf`
+  templates, including paragraph/run formatting, tables, notes, headers,
+  footers, drawings, styles, and page settings.
+- Reconstruct title pages, author and affiliation blocks, abstracts, keywords,
+  headings, body text, equations, figures, tables, captions, notes,
+  references, appendices, and page furniture as editable LaTeX behavior.
+- Support English, Chinese, and bilingual templates, with conservative
+  language-appropriate defaults when the official source is incomplete.
+- Keep each observed source feature in an evidence and ownership audit. A
+  feature is mapped to editable LaTeX, recorded as a default or guidance item,
+  marked unobservable, or left explicitly unresolved.
+- Treat title, author, and affiliation styles as candidates when their meaning
+  is ambiguous. A ledger-bound semantic confirmation prevents author-facing
+  instructions from being promoted into final front-matter mappings.
+- Use PDF comparison when source rendering is available. Image interiors may
+  differ, while image geometry, captions, tables, spacing, wrapping, and page
+  flow remain part of the visual check.
 
-The skill supports English, Chinese, and bilingual templates. When official
-requirements are incomplete, it records a conservative language-appropriate
-default instead of presenting it as a publisher rule.
+### Typical Workflow
 
-### Reconstruction Method
+1. Confirm official sources and preserve their provenance.
+2. Build a Word-format ledger before drafting LaTeX.
+3. Resolve front matter and map source units in bounded review batches.
+4. Build `journal-template.cls` for reusable presentation behavior and
+   `main.tex` for editable manuscript content and fixtures.
+5. Run package, evidence, and mapping audits. Record a clear handoff status.
+6. Compile and compare PDFs when the necessary local tools and a comparable
+   source render are available.
 
-The skill keeps the work on the template-reconstruction path:
-
-1. Inspect the official source and build a paragraph/run, table, drawing, note,
-   and page-furniture evidence ledger.
-2. Classify each source unit by manuscript role and map it to one editable
-   LaTeX owner, or record a default or unresolved gap.
-3. Build and compile a representative `.cls + main.tex` package that exercises
-   the applicable title, metadata, abstract, headings, body, tables, figures,
-   notes, references, and appendix behavior.
-4. Audit evidence coverage before adjusting layout. An initial converter output
-   is a draft for review, not evidence of fidelity.
-5. When source rendering is available, compare PDFs using the same fixture and
-   a role-level content contract before promoting any layout calibration.
-
-Tables are audited as structured content, including cell text, grid, merge,
-fill, and caption behavior. PDF comparison may exclude differing raster-image
-interiors from a format metric, but it still checks image geometry, captions,
-spacing, wrapping, and page flow.
+An ordinary conversion produces a usable package without forcing a full
+cross-publisher benchmark. Regression tooling is reserved for skill
+development or an explicitly requested comparison task.
 
 ### Deliverables
 
-An ordinary conversion produces an editable package with at least:
+An ordinary conversion delivers at least:
 
 ```text
 main.tex
@@ -60,58 +63,47 @@ format_gap_log.md
 README.md
 ```
 
-When the Word source is structurally readable, the package also preserves
-`word_format_ledger.json`. When source inspection is available, it includes
-`source_inventory.json` and `source_feature_coverage.json`. Optional rendering
-work may add a comparison report, layout profile, and diff previews.
+When source inspection is possible, the package also contains the Word-format
+ledger and source-inventory evidence. Mapping and rendering artifacts are
+added when their corresponding checks have run.
 
 ### Installation
 
-Install the `temp2tex/` directory under the Codex skills directory:
+Install the `temp2tex/` directory under your Codex skills directory:
 
 ```text
 <CODEX_HOME>/skills/temp2tex/
 ```
 
-The directory must contain `SKILL.md` at its root. Start a new Codex session
-after installation so the skill is discovered.
+The installed directory must contain `SKILL.md` at its root. Start a new
+Codex session after installation.
 
-Alternatively, download `temp2tex-v0.1.1.skill` from the
-[v0.1.1 release](https://github.com/TomayandJade/temp2tex/releases/tag/v0.1.1)
+Alternatively, download `temp2tex-v0.2.0.skill` from the
+[v0.2.0 release](https://github.com/TomayandJade/temp2tex/releases/tag/v0.2.0)
 and extract it into the same location.
 
-### Typical Use
-
-Provide the official Word template and any available author instructions, then
-ask Codex to load the skill:
+### Typical Request
 
 ```text
-Use $temp2tex to rebuild this official journal DOCX template as an editable
-LaTeX package. Work role by role from the Word evidence, preserve the source
-formatting for the title, front matter, headings, tables, figures, notes,
-references, and appendices, and record unsupported requirements as defaults or
-gaps rather than as official rules.
+Use $temp2tex to rebuild this official journal Word template as an editable
+LaTeX package. Work from the Word evidence unit by unit. Preserve supported
+formatting for front matter, headings, tables, figures, notes, references, and
+appendices. Keep publisher rules, conservative defaults, and unresolved gaps
+separate, then provide the verification status and next required check.
 ```
 
-### Verification
+### Verification And Limits
 
-Compilation and PDF comparison are important checks, but missing local Word,
-TeX, or rendering tools do not block delivery of an editable package. The
-handoff must state the available evidence, completed checks, unresolved gaps,
-and exact commands for pending verification.
+The skill records what has been inspected, mapped, compiled, or visually
+checked. Missing local Word, TeX, or rendering tools do not prevent delivery
+of an editable package; the resulting handoff documents the pending commands
+and limitations.
 
-For skill development or an explicit Word-versus-LaTeX request, the repository
-also includes tools and guidance for same-content regression. A benchmark does
-not replace the evidence ledger for the journal currently being reconstructed.
-
-### Scope And Limitations
-
-Publisher templates can contain incomplete rules, proprietary fonts, embedded
-objects, and Word-specific layout behavior. Exact visual matching may require
-additional official evidence and local rendering. This repository does not
-include publisher-owned templates, downloaded source corpora, or generated
-regression workspaces; obtain and handle those materials under the applicable
-publisher terms.
+Publisher templates can include proprietary fonts, embedded objects, and
+Word-specific behavior. Exact visual matching may require additional official
+evidence and a same-content rendered comparison. This repository excludes
+publisher-owned templates, downloaded corpora, and generated regression
+workspaces.
 
 ### License
 
@@ -124,41 +116,43 @@ Released under the [Apache License 2.0](LICENSE).
 ### 概述
 
 `temp2tex` 是一个 Codex skill，用于依据期刊官方的非 LaTeX 投稿模板，尤其是
-Microsoft Word 模板，以及相关作者指南，重建可编辑的 LaTeX 期刊模板。
+Microsoft Word 模板，以及可获得的作者指南，重建可编辑的 LaTeX 期刊模板包。
 
-它并不把任务当作一次性格式转换，而是引导模型按证据逐项重建。默认交付为便于
-维护的模板包，核心文件通常是 `journal-template.cls` 和 `main.tex`。
+该 skill 引导模型按证据逐项完成重建。默认交付物以
+`journal-template.cls` 和 `main.tex` 为核心，并将官方要求、保守默认值和未解决
+的格式缺口分别记录，便于后续核验和维护。
 
-### 支持的来源
+### 能力范围
 
-- Word 模板：`.doc`、`.docx`、`.docm`、`.dot`、`.dotx`、`.dotm`
-- 官方作者指南、参考文献规则、图件要求和期刊网站说明
-- 能提供相关版式证据的官方样刊 PDF 或已发表样例
+- 检查 `.doc`、`.docx`、`.docm`、`.dot`、`.dotx`、`.dotm` 和 `.rtf` 模板，覆盖
+  段落与字符 run 格式、表格、注释、页眉页脚、图形、样式和页面设置。
+- 将标题页、作者与单位信息、摘要、关键词、各级标题、正文、公式、图片、表格、
+  题注、脚注、参考文献、附录和页面元素重建为可编辑的 LaTeX 行为。
+- 支持英文、中文和中英文双语模板；当官方信息不完整时，采用与语言习惯相符的
+  保守默认格式，并明确记录其来源。
+- 为每项可观测的源格式建立证据与归属审计：映射到可编辑 LaTeX、作为默认值或
+  指导信息保留、标记为不可观测，或明确保留为未解决项。
+- 标题、作者和单位样式在语义不明确时会先作为候选项。账本绑定的语义确认步骤可
+  防止填写说明被误写入最终的前置信息映射。
+- 在可获取源文件渲染结果时进行 PDF 对比。图片内部内容可以不同，但图片几何、
+  题注、表格、间距、换行和页面流仍属于检查范围。
 
-该 skill 支持英文、中文和中英文双语模板。官方要求不完整时，会采用保守且符合
-语言习惯的默认格式，并明确标记为默认值，不会将其表述为官方规则。
+### 典型流程
 
-### 重建方法
+1. 确认官方来源并保存其出处信息。
+2. 先建立 Word 格式账本，再起草 LaTeX 模板。
+3. 以有限批次完成前置信息确认和源单元映射。
+4. 用 `journal-template.cls` 承担可复用的版式规则，用 `main.tex` 保存可编辑的
+   稿件内容和测试样稿。
+5. 执行模板包、证据和映射审计，并记录明确的交接状态。
+6. 当本地工具和可比源渲染齐备时，编译并比较 PDF。
 
-skill 通过以下流程让模型始终围绕模板重建工作：
-
-1. 检查官方来源，建立段落与连续 run、表格、图形、注释和页眉页脚的证据账本。
-2. 为每个来源单元判定稿件角色，并映射到一个可编辑的 LaTeX 格式所有者；无法
-   确定时记录默认值或格式缺口。
-3. 构建并编译覆盖标题、前置信息、摘要、各级标题、正文、表格、图片、注释、
-   参考文献和附录的代表性 `.cls + main.tex` 模板包。
-4. 在调整版式前完成证据覆盖审计。任何初始转换结果都只是待审计草稿，不能作为
-   格式一致或任务完成的依据。
-5. 在可渲染来源文件时，使用同一份测试内容和角色级文本契约比较 PDF，之后才允许
-   推广版式校准结果。
-
-表格会作为结构化内容审计，包括单元格文字、网格线、合并、底纹和题注。PDF 对比
-可以在格式指标中忽略不同的位图内部内容，但仍会检查图片的尺寸、位置、题注、
-留白、环绕和后续页面流；表格不会被忽略或栅格化处理。
+普通转换任务可以直接交付可用模板包，无需自动启动跨出版社的完整回归。回归工具
+服务于 skill 开发或用户明确要求的对比任务。
 
 ### 交付物
 
-常规转换至少交付以下可编辑文件：
+普通转换至少交付：
 
 ```text
 main.tex
@@ -171,9 +165,8 @@ format_gap_log.md
 README.md
 ```
 
-Word 来源可被结构化读取时，交付物还会保留 `word_format_ledger.json`。完成来源
-检查时，还会包含 `source_inventory.json` 与 `source_feature_coverage.json`。完成可选
-渲染验证后，可额外提供对比报告、版式分析和差异预览图。
+当源模板可被结构化检查时，模板包还会保留 Word 格式账本和源文件清单。已执行的
+映射审计和渲染验证会附带相应记录。
 
 ### 安装
 
@@ -183,35 +176,29 @@ Word 来源可被结构化读取时，交付物还会保留 `word_format_ledger.
 <CODEX_HOME>/skills/temp2tex/
 ```
 
-目录根部必须包含 `SKILL.md`。安装后新建一个 Codex 会话，使系统重新发现该 skill。
+安装目录根部必须包含 `SKILL.md`。安装后新建一个 Codex 会话，使其重新发现该
+skill。
 
-也可以从 [v0.1.1 发布页](https://github.com/TomayandJade/temp2tex/releases/tag/v0.1.1)
-下载 `temp2tex-v0.1.1.skill`，并解压到同一位置。
+也可以从 [v0.2.0 发布页](https://github.com/TomayandJade/temp2tex/releases/tag/v0.2.0)
+下载 `temp2tex-v0.2.0.skill`，并解压到同一位置。
 
-### 典型用法
-
-提供官方 Word 模板和可获得的作者指南后，请 Codex 加载该 skill。例如：
+### 典型请求
 
 ```text
-使用 $temp2tex 将这份期刊官方 DOCX 模板重建为可编辑的 LaTeX 模板包。请从 Word
-证据出发，按稿件角色逐项处理标题、前置信息、各级标题、表格、图片、注释、参考
-文献和附录的格式；无法确认的要求请记录为默认值或格式缺口，不要表述为官方规则。
+使用 $temp2tex 将这份期刊官方 Word 模板重建为可编辑的 LaTeX 模板包。请以 Word
+证据为基础逐项处理，保留前置信息、标题、表格、图片、脚注、参考文献和附录中有
+官方依据的格式；将官方规则、保守默认值和未解决缺口分开记录，并说明验证状态和
+下一步需要执行的检查。
 ```
 
-### 验证
+### 验证与限制
 
-编译和 PDF 对比很重要，但本地缺少 Word、TeX 或渲染工具时，仍应交付可编辑模板包。
-交付说明必须写清可用证据、已完成检查、未解决缺口，以及待执行验证的具体命令。
+该 skill 会记录已完成的检查、映射、编译和视觉验证。本地缺少 Word、TeX 或渲染
+工具时，仍可交付可编辑模板包；交接说明会列出待执行的命令和限制。
 
-当用户明确要求 Word 与 LaTeX 对比，或正在改进 skill 本身时，仓库还提供同稿回归
-测试工具和方法。回归结果不能替代当前期刊模板的逐项证据账本。
-
-### 范围与限制
-
-期刊模板可能包含不完整要求、专有字体、嵌入对象和仅能在 Word 中实现的版式行为。
-要达到严格视觉一致，可能仍需更多官方证据和本地渲染验证。仓库不包含出版社拥有
-的模板、下载语料或生成的回归工作区；相关材料应由使用者自行取得并遵守适用的
-出版社条款。
+期刊模板可能包含专有字体、嵌入对象和仅能在 Word 中实现的版式行为。要达到严格的
+视觉一致性，通常还需要更多官方证据和同稿渲染对比。本仓库不包含出版社拥有版权的
+模板、下载语料或生成的回归工作区。
 
 ### 许可证
 

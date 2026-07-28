@@ -1,378 +1,378 @@
 ---
 name: temp2tex
-description: Convert official journal website non-LaTeX templates, especially Word .doc/.docx/.docm/.dot/.dotx/.dotm author templates, into editable Overleaf-ready LaTeX template packages. Use this skill whenever the user asks to rebuild a journal template from official Word/PDF/web author instructions, including sparse or blank Word templates that define formatting through named styles; reproduce cover/title/abstract/table/figure/heading/footnote/reference/appendix/body formatting in LaTeX; create a class-based `.cls + main.tex` package; handle Chinese or English journal defaults when official rules are incomplete; or optionally verify the result with PDF rendering or official Word-vs-LaTeX regression.
+description: Convert official journal website non-LaTeX templates, especially Word .doc/.docx/.docm/.dot/.dotx/.dotm/.rtf author templates, into editable Overleaf-ready LaTeX template packages. Use this skill whenever the user asks to rebuild a journal template from official Word/PDF/web author instructions, including sparse or blank Word templates that define formatting through named styles; reproduce cover/title/abstract/table/figure/heading/footnote/reference/appendix/body formatting in LaTeX; create a class-based `.cls + main.tex` package; handle Chinese or English journal defaults when official rules are incomplete; or optionally verify the result with PDF rendering or official Word-vs-LaTeX regression.
 ---
 
 # Temp2TeX
 
 ## Purpose
 
-Transform a journal's official non-LaTeX author template into a compile-ready, editable LaTeX template package. Treat the task as evidence-backed template reconstruction for an LLM agent, not as a local automation pipeline.
+Reconstruct an editable LaTeX journal template from official non-LaTeX source
+materials. This is an evidence-backed reconstruction task for an LLM agent,
+not a one-shot Word converter, a flattened PDF imitation, or a benchmark
+runner.
 
-The usual input is a journal DOC/DOCX author template from an official website. Use official author instructions, PDF samples, artwork rules, and reference rules as supporting evidence. If official requirements are incomplete, apply conservative Chinese or English journal defaults and record the fallback instead of presenting it as an official rule.
+The usual source is an official Word author template plus author instructions,
+sample PDFs, reference rules, artwork rules, and website guidance. Word is the
+primary template evidence; supporting official sources resolve ambiguity.
 
-## Skill Loading Contract
+The default result is an editable, Overleaf-ready package centered on
+`journal-template.cls + main.tex`. Use a `.sty` file only as a compatibility
+layer or when preserving an official class is the source-backed choice.
 
-When this skill is loaded, the agent's goal is to produce a usable LaTeX template package from official evidence. Local scripts, renderers, and the admitted regression corpus with per-case admission status are support resources, not the definition of success for ordinary user work.
+## Mission Lock
 
-The agent should:
+Keep this invariant visible in working notes:
 
-1. Reconstruct the template from source evidence before writing LaTeX.
-2. Default to `journal-template.cls + main.tex`. Use `.sty` only as a legacy compatibility shim or when preserving an official class is the safer source-backed choice.
-3. Deliver editable LaTeX files as the primary output, even if Word, LibreOffice, TeX, or PDF comparison tools are unavailable.
-4. Record official rules, inferred defaults, and unsupported gaps in `template_spec.json` and `format_gap_log.md`.
-5. Use PDF render comparison when possible, but treat missing render tooling as a verification gap, not as a reason to stop.
-6. Use official-LaTeX regression only when the user explicitly asks for Word-vs-LaTeX comparison or when improving this skill from the regression corpus.
+> Every observable source formatting decision is mapped to an editable LaTeX
+> owner, recorded as a justified default, retained as an unresolved gap,
+> marked not observable, or classified as non-format guidance with a reason.
 
-## Mission Lock And Control Loop
+Do not claim fidelity because a converter ran, a class compiled, or a PDF looks
+plausible. A source rule, an inference, a language default, and a pending gap
+are different states and must remain distinguishable.
 
-This skill directs an agent; it is not an instruction to run a one-shot local
-converter. Keep this invariant throughout the task:
+For an ordinary user conversion, produce the package and its evidence record.
+Do not start the 30-case corpus. Run official Word-vs-LaTeX regression only
+when the user explicitly requests comparison or the task is skill development.
 
-> Reconstruct every observable Word formatting decision as an editable,
-> evidence-backed LaTeX decision, then audit the result before claiming the
-> template is complete.
+## Start Here
 
-Work in explicit phases. Do not skip a phase merely because a script produced
-an initial package, and do not start full-corpus regression for an ordinary
-journal conversion.
+Read these files in order before beginning a conversion:
 
-| Phase | Required checkpoint artifact | Advance only when |
-| --- | --- | --- |
-| 1. Evidence | source inventory and paragraph/run ledger | every applicable source zone has evidence IDs or an explicit `not_observable` record |
-| 2. Mapping | role-to-owner queue and `template_spec.json` | each role is marked source-backed, inferred, default, or unresolved; no generic Word style silently overrides a role |
-| 3. Build | editable `.cls + main.tex` package | every applicable role is exercised by the fixture and owns its formatting in a maintainable location |
-| 4. Audit | coverage report, compile result, and verification record | critical coverage gaps, compile errors, and known layout failures are repaired or explicitly retained in `format_gap_log.md` |
-| 5. Handoff | README and complete package | claims distinguish source evidence, defaults, completed checks, and pending checks |
+1. `references/agent-control-loop.md`: task invariant, phase gates, live
+   ledger, anti-drift checks, and ordinary versus training scope.
+2. `references/input-triage.md`: authoritative-source selection, source
+   payload detection, legacy DOC/DOT/RTF handling, sparse templates, and
+   unavailable-input behavior.
+3. `references/atomic-reconstruction.md`: indivisible Word evidence units,
+   map-or-gap rule, bounded review batches, direct/object bindings, and audit.
 
-At every phase boundary, state: **current phase, evidence used, unresolved
-roles, next audit action**. If the work starts drifting into renderer setup,
+At every phase boundary, state: current phase, source evidence used,
+unresolved roles, and next audit action. If work drifts into tool setup,
 benchmark automation, sample-manuscript transcription, or cosmetic tuning
 without resolving an evidence or mapping item, return to the current phase.
 
-Read `references/agent-control-loop.md` before beginning a conversion and
-again before handoff. It defines the working ledger, stop conditions, audit
-questions, and the distinction between ordinary conversion and skill training.
-Read `references/atomic-reconstruction.md` before extracting the first role.
-It makes the paragraph/run-to-owner loop mandatory, so an initial converter
-output is only a draft to audit rather than a substitute for reconstruction.
-An initial converter output is never evidence of fidelity or completion.
+## Workflow
 
-## Model Workflow
+### 1. Classify The Task And Sources
 
-1. **Classify the task**
-   Decide whether this is an ordinary template conversion, an explicit official Word-vs-LaTeX comparison, or skill training/regression work. Then classify the actual source container and evidence condition with `references/input-triage.md`; do not trust the filename extension alone. Ordinary conversion should produce the package without running the full corpus. An unreadable, protected, or damaged Word file limits what can be claimed, but it does not justify inventing rules or withholding a default-backed editable package when official web/PDF evidence is still usable.
+Classify the work as ordinary conversion, explicit official Word-vs-LaTeX
+comparison, or skill training. Inspect actual file contents rather than trusting
+the extension. An OpenXML-looking `.dot` may be parsed directly; true legacy
+DOC, DOT, and RTF retain the original as authority and may use a temporary
+LibreOffice DOCX only for inspection.
 
-2. **Confirm official sources**
-   Gather the journal page, DOC/DOCX template, author instructions, PDF sample, artwork rules, reference rules, and assets. Prefer official publisher or journal pages over third-party template sites. Record URLs, access date, local paths, and hashes when files are available.
+For a legacy conversion, retain that derived DOCX inside the package workspace
+with `build_word_format_ledger.py --retain-derived-docx ...`; its path and
+hash must remain bound to the original-file hash in the ledger. It is never a
+replacement authority. Before a source-fidelity claim, compare the legacy
+original render or an official PDF with the derived inspection path.
 
-3. **Build a layout evidence packet**
-   Do not map Word XML properties straight into a class. First create `word_format_ledger.json` with `scripts/build_word_format_ledger.py`. Treat it as a required intermediate artifact for a readable DOCX/DOCM/DOTX/DOTM source: it records every visible paragraph and contiguous run span, groups them into front matter/body/references/appendix zones, and queues each role for a named LaTeX owner. Resolve the queue one role at a time before writing `.cls`: title, author and affiliations, abstract and keywords, each heading level, body paragraphs, table cells/caption, figure geometry/caption, notes, references, and appendix. Do not let a global `Normal` style or a single sample paragraph overwrite a role-specific decision.
-   Then identify representative rendered evidence for every applicable zone: page frame, page furniture, title/author block, abstract, body, headings, table, figure, notes, references, and appendix. For anchored drawings and text boxes, also retain native width/height, relative coordinate systems, offsets, wrapping, shape identity, and paragraph-local run spans before deciding whether they belong in flow. Reconcile the Word style chain, direct formatting, visible source page, and official instructions. Use `references/reconstruction-protocol.md` and `references/model-playbook.md` for the decision order.
-   Classify the Word source before using it as a PDF reference: a populated manuscript sample can support a same-content fallback comparison, while an instruction-only template can still provide formatting evidence but is `not_comparable` when normalization would place guidance text in the test manuscript. Do not promote an instructional placeholder, placeholder colour, or sample numbering as a journal-wide manuscript rule without a role-matched rendered exemplar.
-   When a heading exemplar or named heading style has no explicit size, inspect
-   role-matched official template prose for a stated heading, subheading, or
-   tertiary-heading size. Preserve the sentence and paragraph index, and fill
-   only that missing size; never borrow an unrelated point value or override
-   explicit Word formatting.
-   Preserve every contiguous visible Word run-format span before mapping a
-   role: each span records its text range, direct formatting, and effective
-   formatting. This includes visible underline, strike, superscript, subscript,
-   and safe external hyperlink targets. Keep a link target local to its visible
-   span; do not turn surrounding paragraph text into a link, and do not invent
-   a destination for an internal Word anchor or malformed relationship. Render
-   verified http(s) or mailto targets as editable LaTeX links. Retain their source
-   variant even when LaTeX uses a stable editable approximation. For tracked Word
-   revisions, preserve inserted text as current visible evidence but exclude
-   deleted and moved-from text from both paragraph text and run spans. Record
-   revision counts in the evidence packet so an editor can confirm that the
-   source was a revision-bearing template. Preserve Word content-control tag,
-   alias, lock, placeholder, and location as semantic evidence, but do not
-   create a manuscript role from control metadata alone. Preserve anchored Word
-   comments as guidance evidence only: never emit comment text as manuscript
-   content. An explicit comment can support a formatting decision only when it
-   names a target role, states an unambiguous value, and is recorded with its
-   anchor and conflict check against visible source and official instructions.
-   Preserve body footnote and endnote reference IDs, anchor paragraphs, local
-   marker formatting, linked note text, and explicit Word settings numbering.
-   Apply a non-default LaTeX marker sequence only when the Word setting
-   explicitly provides it; keep title-page author marks separate from body
-   footnotes.
-   Inspect VML compatibility drawings as well as DrawingML. Retain their media
-   relationship, text-box text, shape style, and OLE marker; treat VML absolute
-   placement as a render-confirmed candidate rather than direct LaTeX geometry.
-   Keep paragraph-level role formatting
-   separate from local run overrides: a
-   bold `Abstract` label or correspondence marker must not make the entire
-   abstract or affiliation block bold. Promote run typography to a role only
-   when all visible runs agree, and keep abstract and keyword role evidence
-   separate. Distinguish a standalone abstract-label paragraph, a true
-   label-and-content paragraph, and content with no visible label. Indentation
-   alone does not prove a run-in label. Do not discard visible front-matter
-   roles merely because the publisher placed them in a borderless Word layout
-   table; preserve their document-flow order and cell-local evidence. Record
-   each front-matter boundary once
-   as the larger of the preceding Word space-after and following space-before;
-   never add both values in LaTeX. DrawingML shape text is a separate source
-   container, not an image label: retain each shape paragraph and its
-   contiguous DrawingML run and field spans, including direct size, weight,
-   italic state, and RGB colour. Reuse the same local LaTeX formatting groups
-   in textboxes.tex; only activate page-relative placement after a
-   same-content rendered comparison. Active text/page-field furniture and
-   For Word OMML equations, preserve the source structure and create a separate
-   equations.tex candidate. Convert only supported structures such as ordinary
-   math runs, fractions, scripts, roots, delimiters, functions, common n-ary
-   operators, explicit limits, matrices, and equation arrays. Keep unsupported
-   math structures
-   as source evidence with a manual-translation entry; do not flatten them into
-   plausible plain text or insert them into main.tex automatically.
-   deterministic rules may be mapped directly on a per-header/footer-part
-   basis; one unsafe logo or text-box variant must not suppress an unrelated
-   safe running-text variant. Preserve each active running-text paragraph as
-   contiguous run-format spans; generate local LaTeX groups for visible
-   size, weight, italic state, and RGB colour instead of flattening the
-   paragraph to its first run. First-page drawings and image placement remain
-   render-confirmed candidates. Preserve unequal Word `w:col` widths and
-   paragraph-level `w:br type="column"` breaks; do not silently reduce them to
-   equal-width `twocolumn` output. Use the generated unequal-column macros
-   only as a separately rendered candidate. If a generic `Normal`/`Body Text`
-   style conflicts with multiple visible body paragraphs, preserve the named
-   style as the default and record a visible-flow body candidate. The candidate
-   must live under `document.render_calibration` with
-   `body_style_mode: visible_flow_exemplar`; it must never overwrite
-   `page.source_body_style`. Promote it only after same-content PDF comparison.
-   For tables and drawings, record the paragraph index of the object and every
-   caption candidate. For the selected Word table, also retain each cell's row,
-   column, fill, merge state, and paragraph-local run spans. Replay a bounded
-   table sample when the cell sequence, horizontal spans, continuous vertical
-   merges, and up to four cell paragraphs are unambiguous; broken merge chains,
-   longer content, and truncated samples remain explicit mapping gaps. Attach a caption only when a visible label or semantic
-   caption style is outside table cells and adjacent/nearby in Word document
-   flow. Use that relation for caption-above/below order; otherwise keep the
-   language-neutral default and log it. A caption-like table header, distant
-   instruction, or generic prose must not define the journal-wide order.
-   Resolve the caption/object gap from the two paragraph sides that face each
-   other: caption space-after plus object space-before when the caption is
-   above, or object space-after plus caption space-before when it is below.
-   Emit the larger available value once. If order or both facing sides are
-   missing, use and log the caption-gap default; never substitute the caption's
-   outside spacing. Preserve that outside caption side separately as the class
-   outer-caption skip; do not discard it or merge it into the object gap.
-   Treat Word inline/anchor state as placement evidence, not as a LaTeX float
-   command. Record a non-floating option only as
-   `placement_calibration.status: render_probe`; activate it only after the
-   strict same-content promotion gate writes `render_verified` acceptance.
-   Keep float/text spacing separate from caption/object spacing. Measure the
-   outer boundary only when the neighboring Word paragraph is body-text-like;
-   exclude another caption, table/figure note, heading, abstract, keyword, or
-   reference role. Store the aggregate as `page.float_spacing_evidence` with
-   `mapping: candidate_only`, and activate TeX float lengths only through a
-   promoted `page.float_spacing_calibration`.
-   When Word has multiple section frames, retain a source-labeled `page-frame.tex`
-   candidate alongside `section-flow.tex`; never apply a later section's paper
-   size or margins to the entire document without rendered evidence.
+An unreadable, protected, or damaged Word file limits Word-specific claims but
+does not justify fabricated rules or withholding a default-backed editable
+package when official PDF/web evidence is usable. Record the limitation and
+the next verification action.
 
-4. **Draft `template_spec.json`**
-   Convert the evidence packet into a structured spec following `references/spec-schema.md`. Treat this as the evidence ledger, not just a generator input. Clearly mark `source`, `inferred`, `default`, and `unverified` decisions. A section with no representative evidence must remain editable but cannot be claimed visually matched.
-   A publisher-prefixed Word style is only a tie-breaker after its semantic
-   role matches; if no matching role exists, record an explicit `default`
-   role and gap instead of reusing a nearby style from the same family.
+### 2. Capture Evidence Before Writing LaTeX
 
-5. **Audit source-feature coverage**
-   Before PDF tuning, create `source_feature_coverage.json`. For each visible
-   Word feature, record whether it has a source-backed editable owner in the
-   generated package. When a Word format ledger exists, reconcile every
-   ledger role against the selected `template_spec.json` path and the emitted
-   LaTeX interface. Treat `mapped_pending_visual_confirmation` as unfinished
-   fidelity work, not a pass. Resolve `critical` and `high` gaps such as run-level
-   typography, line numbers, title, and page furniture before changing
-   margins, font metrics, or float spacing. A named but unused Word style is
-   not coverage for a visible feature.
+Build a source inventory and, for readable Word input, a Word format ledger.
+When those helpers or structured Word inspection are unavailable, create
+`manual_evidence_ledger.md` before writing the class. It must use the
+tool-independent record in `references/atomic-reconstruction.md`: one
+source-located unit at a time, with its observed format, role decision,
+LaTeX owner, status, and next verification. Tool absence never permits a
+memory-only or prose-only reconstruction.
+Resolve evidence separately for page frame, furniture, title/article type,
+author/affiliation/metadata, abstract/keywords, each heading level, body,
+lists, equations, tables, figures/captions, notes, references, appendix, and
+cover or text boxes when present.
 
-6. **Design the LaTeX architecture**
-   Follow `references/latex-architecture.md`. Put class-level behavior in `journal-template.cls`: page frame, fonts, title macros, front matter, headings, page style, captions, float defaults, footnotes, bibliography style hooks, and appendices. Put example manuscript content and metadata usage in `main.tex`.
+For metadata, separate publication identifiers, DOI, received/revised/accepted
+dates, funding, contributor notes, and editorial notices. Preserve each visible
+line plus its label and value runs. Do not collapse adjacent metadata into one
+front-matter style: every detected kind needs its own source/default/gap
+decision and class-level editable owner.
 
-7. **Build the package**
-   Create or generate the package, then edit it so a human can maintain it. `main.tex` must contain a compileable representative fixture for every applicable zone: title, authors, abstract, keywords, headings, body, table, figure, equation, footnote, references, and appendix. Class macros or empty placeholder environments alone do not satisfy this requirement. Keep examples long enough to exercise the template, but do not bury format logic in uneditable converted output.
-   When source media extraction succeeds, use body-role assets in the editable
-   figure example instead of replacing visible source artwork with an empty
-   frame. Keep header/footer assets in their own class slots and activate them
-   only after the first-page/later-page render comparison supports the placement.
+Preserve visible paragraph and contiguous run boundaries. Treat table grids and
+cell text, drawing geometry and captions, list systems and list items, formula
+systems and formula instances, and header/footer variants as separate evidence
+units. A generic Word style, placeholder, instruction, first nonempty line, or
+initial converter output never proves a manuscript role.
 
-8. **Self-check and render-calibrate when possible**
-   Use `references/verification-checklist.md`. Compile after the final content and class edits. When a Word/PDF reference and rendering tools are available, treat one same-content comparison loop as part of an ordinary conversion: first repair page frame or column transitions, then page count/body density, then front matter, table/figure flow, page furniture, and bibliography geometry. Change one source-backed variable at a time in a separate candidate spec. Promote only a candidate that preserves required zones and page geometry while improving the comparison; otherwise keep the ordinary class, record the rejected candidate, and do not transfer its setting to another journal. When a Word source is sparse, populate a *copy* with the same representative fixture used in `main.tex` before comparing PDFs; do not compare unrelated placeholder pages. If rendering cannot run, write exact rerun commands and a pending-check list in `README.md`.
-   Create a role-level same-content anchor contract before interpreting any
-   PDF geometry: include every applicable front-matter, heading/body,
-   table/caption/note, figure/caption, note, reference, and appendix zone.
-   Every declared unique phrase must occur in both PDFs. A partial anchor hit,
-   missing structural label, different heading numbering, or unpaired note
-   means `not_comparable`; repair the fixture before changing the class.
-   Use graphics-insensitive PDF metrics only to exclude the *interior pixels*
-   of differing manuscript images. Keep image frame size, position, wrapping,
-   caption, adjacent spacing, page flow, and all table geometry in the audit
-   target. A masked image interior never excuses a missing caption or shifted
-   figure/table block.
-   When promotion succeeds, regenerate the final deliverable from
-   `verified_spec.json` with its accepted `promotion_report.json`, then compile
-   and validate that regenerated package. Do not hand off a temporary candidate
-   directory or manually edit a `render_verified` status into the ordinary spec.
-   In particular, a successful visible-body probe records its selected mode in
-   `document.render_calibration`; the original named and visible Word body
-   evidence remains unchanged for later audit.
+Also retain layout-only runs. A tab, line break, non-breaking space, or
+directly formatted whitespace can define an inline separator, table/header
+layout, or field boundary even without visible letters. It needs an explicit
+mapping/default/gap disposition; ordinary inherited spaces remain part of the
+parent paragraph rather than becoming artificial formatting rules.
 
-9. **Use regression only for the right task**
-   If the task includes official Word and official LaTeX templates, compare the Temp2TeX-generated PDF against the official LaTeX PDF built with the same normalized body. If the task is skill improvement, use the admitted regression corpus as training signal after the affected case or representative batch, and exclude candidates that fail admission preflight.
+Treat an otherwise empty paragraph with explicit paragraph layout, break/tab,
+or anchored-object evidence the same way. It is a local `paragraph.layout`
+unit that must be reconstructed or logged, particularly around title pages,
+abstracts, figures, tables, and page furniture. Do not replace it with a
+document-wide line-spacing or margin adjustment.
 
-## Reference Routing
+Before mapping a large or unfamiliar Word source, audit capture completeness.
+The ledger must report every observable document-flow/table-cell paragraph,
+contiguous visible run, ancillary text unit, and observable object/system
+unit. `capture_complete` authorizes atomic map-or-gap review only;
+`captured_sparse_or_empty` requires external official evidence or explicit
+defaults; `capture_incomplete` blocks strict mapping completion and visual
+calibration.
 
-- Read `references/input-triage.md` first for every conversion task; it defines source-container detection, version selection, sparse-template handling, and inaccessible-source behavior.
-- Read `references/atomic-reconstruction.md` before evidence extraction; it defines the indivisible Word evidence unit, the map-or-gap rule, and the per-role audit record.
-- Read `references/model-playbook.md` before ordinary conversion tasks or when deciding task scope.
-- Read `references/reconstruction-protocol.md` before extracting a Word template into `template_spec.json`; it defines the evidence packet and the sparse-template comparison procedure.
-- Read `references/word-evidence-to-latex.md` after inspecting a Word template and before translating its page, body, title, heading, table, figure, or reference styles into `template_spec.json` and `journal-template.cls`.
-- Read `references/latex-architecture.md` before writing or revising `journal-template.cls` and `main.tex`.
-- Read `references/spec-schema.md` before writing or editing `template_spec.json`.
-- Read `references/format-defaults.md` when official evidence is missing or when selecting Chinese vs English defaults.
-- Read `references/verification-checklist.md` before final handoff.
-- Read `references/render-compare.md` only when PDF render comparison is possible or explicitly requested.
-- Read `references/regression-testing.md` only for official Word-vs-LaTeX regression or skill training work.
-- Read `references/system-architecture.md` when changing the bundled workflow or scripts.
+For every table or body drawing, classify its caption relation before choosing
+caption order, float behavior, spacing, or a PDF anchor. Only an adjacent or
+nearby external caption with a source-confirmed above/below relation may drive
+those decisions. A distant candidate, unmatched label, tie, or missing caption
+is a diagnostic or evidence gap, not permission to guess. Such an object may
+still supply local geometry, but its caption/float rules remain default-backed
+or pending until stronger source or same-content render evidence exists.
 
-## Output Contract
+Read the following when extracting or interpreting evidence:
 
-For an ordinary conversion task, deliver an Overleaf-ready folder or zip containing:
+- `references/model-playbook.md` for evidence priority, front matter, Word
+  styles, headers/footers, layout order, defaults, and Chinese/mixed sources.
+- `references/word-evidence-to-latex.md` for run, paragraph, table, figure,
+  caption, note, TOC, list, and equation details.
+- `references/system-format-triage.md` before acting on Word grids, character
+  effects/styles, language/RTL, themes, or unmodeled OOXML properties.
+- `references/reconstruction-protocol.md` for evidence packet structure and
+  sparse-template comparison procedure.
+
+### 3. Make One Auditable Mapping Decision At A Time
+
+Use the atomic reconstruction loop: observe, classify, map or gap, exercise,
+and audit. Give each source unit a semantic role and one narrow editable LaTeX
+owner, or make its default/guidance/unresolved/not-observable status explicit.
+Keep run-local effects local. Never turn a single paragraph, a generic `Normal`
+style, or a visual score into a document-wide rule.
+
+When `word_format_ledger.json.front_matter_sequence_review` requires semantic
+confirmation, create or complete the ledger-fingerprint-bound
+`front_matter_semantic_confirmation.json` before the first atomic mapping
+batch. Confirm each ordered candidate from visible Word context and retain its
+candidate role. A disagreement is an evidence gap requiring further official
+material or a conservative unresolved record. Regenerate the ledger only after
+source interpretation or extraction actually changes.
+
+For a large ledger, work in one dependency-ordered role slice at a time. Use
+`--pending-only` with the atomic review helper for active continuation batches;
+it shows only unresolved work. If that slice has no pending groups, audit its
+existing final decisions only for a concrete source/owner/binding conflict, or
+move to the next readiness-recommended pending slice. Do not manufacture an
+empty task for a later model.
+
+Mapped/default decisions with direct Word formatting need property-level
+bindings from each exact source value to an active package-local LaTeX token.
+Table, drawing, text-box, page-frame, and furniture decisions also need
+property-level object-layout bindings. A declared but unused class macro is not
+an active owner. See `references/atomic-reconstruction.md` for the required
+records and `references/latex-architecture.md` for where each behavior belongs.
+
+### 4. Build An Editable Package
+
+Put reusable journal behavior in `journal-template.cls`: page frame, fonts,
+title/front matter interfaces, headings, captions, floats, notes, bibliography,
+appendix, and running furniture. Put neutral editable fixture content and user
+metadata in `main.tex`. Keep assets in `assets/` or `figures/`; do not turn a
+filled manuscript or source artwork content into the default template body.
+
+Declare the compilation engine in the package README. Chinese or mixed-language
+packages require XeLaTeX. English-only packages may offer PDFLaTeX as a
+portable fallback only when the class selects a documented TeX font fallback;
+do not load `fontspec` unconditionally and leave the engine implicit.
+
+When source-backed metadata types are present, ship a commented `metadata.tex`
+field skeleton and a commented `\input{metadata.tex}` entry in `main.tex`.
+The skeleton must expose each observed typed field with its source label but no
+copied article value. It is not acceptable to hide all source-backed metadata
+behind one empty generic command.
+
+Read `references/latex-architecture.md` before writing the class, and
+`references/spec-schema.md` before creating `template_spec.json`. When official
+requirements are incomplete, use the appropriate English, Chinese, or mixed
+default from `references/format-defaults.md`; log the missing source evidence,
+chosen value, language profile, LaTeX owner, and verification need.
+
+### 5. Audit And Verify In Order
+
+Audit source capture and atomic decisions first, then active ownership,
+compilation, required structure, and finally visual layout. A pending Word
+mapping blocks full-fidelity claims and calibration, but a missing local TeX or
+PDF tool does not block delivery of an editable package with explicit rerun
+instructions.
+
+When a comparable same-content PDF pair exists, repair in this order: fixture
+validity, structural page flow, local furniture, front matter, object/caption
+flow, page frame, body density, then running furniture. Change one
+source-backed variable at a time. Do not use a generic margin, font, or
+line-spacing search to conceal an unfinished role.
+
+For images, raster content may differ. Mask only raster image interiors in an
+image-insensitive metric; continue checking image frame geometry, caption,
+wrapping, whitespace, and surrounding flow. Never mask table text, table rules,
+captions, vector geometry, or ordinary text.
+
+Before comparing a populated fixture, save a language- and profile-specific
+same-content anchor map. It must cover every populated role, including Chinese
+or bilingual front matter when present. Align the image representation and
+declared frame geometry on both sides first: a Word raster placeholder versus a
+LaTeX empty frame is a fixture mismatch, not evidence for changing the journal
+class. Preserve that mismatch for repair; do not hide it by masking the whole
+figure or by tuning unrelated margins and fonts.
+
+A full-document comparison contract also requires source-observable or
+independently verified shared structure for every populated table and figure.
+When a sparse Word source contains no table or body-artwork evidence, an
+injected default table or image may exercise package interfaces and provide
+local diagnostics, but it must use a `partial_zone` contract and cannot
+calibrate global page, body, float, or caption rules. For a controlled
+same-content render test, optional tooling may use the same neutral raster
+placeholder on both paths; mask only its interior after its declared width,
+height, frame, caption, and surrounding flow agree.
+
+Read `references/verification-checklist.md` before handoff and
+`references/render-compare.md` whenever rendering is possible. Read
+`references/regression-testing.md` only for explicit comparison or skill
+training work.
+
+### 6. Hand Off Without Overclaiming
+
+Separate official rules, inferences, defaults, completed checks, and pending
+checks in the package README and gap log. An ordinary handoff is not complete
+when it silently omits an observable role. A continuation checkpoint may retain
+pending mapping work for the next model, but it is never a fidelity claim.
+
+When the local validator is available, run
+`validate_latex_package.py <package-directory>` immediately before handoff.
+Its report now belongs in `<package-directory>/package_validation.json` unless
+an explicit `--output` is supplied. `valid: false` is a handoff blocker for an
+ordinary conversion: fix the reported contract issue, or label the result a
+continuation checkpoint and state exactly which audit/coverage/specification
+gate remains open. A successful TeX compile, a nonempty `.cls`, or a rendered
+PDF never substitutes for this gate. Accept a `valid: true` report only when
+its `schema_version` is current and its `package_contract_fingerprint` matches
+the package after the latest editable-source change; rerun validation after any
+class, fixture, evidence, asset, specification, or gap-log edit. When the
+validator is unavailable, retain the corresponding manual checklist and make
+the missing check explicit.
+
+The generated `HANDOFF_STATUS.md` intentionally starts as `blocked`, with
+pending validation and fingerprint fields. To finalize an ordinary handoff,
+first validate the finished non-status package, then set `Ordinary handoff` to
+`ready`, `Package validation` to `valid`, and `Package fingerprint` to that
+report's fingerprint. Run validation once more. The status file itself is
+excluded from the fingerprint so this final status update does not stale the
+report; any later template, fixture, evidence, asset, specification, README,
+or gap-log edit does.
+
+When the Word mapping and package structure are complete but a required local
+validator, TeX engine, or PDF renderer is unavailable, use the narrower state
+`Ordinary handoff: ready_with_pending_local_verification`. It is permitted only
+with `Package validation: pending`, `Package fingerprint: pending`,
+`Verification environment: unavailable`, and a `Required Next Action` that
+gives the exact missing command. This permits an editable ordinary delivery
+with an explicit local-verification boundary; it never permits unfinished
+source capture, mapping, ownership, or gap work to be called ready.
+
+## Required Deliverable
+
+For an ordinary conversion, deliver:
 
 - `main.tex`
 - `journal-template.cls`
 - `references.bib`
-- `figures/`
-- `assets/`
+- `figures/` and `assets/`
 - `template_spec.json`
-- `word_format_ledger.json` when the source is a readable OpenXML Word template
 - `format_gap_log.md`
+- `HANDOFF_STATUS.md`
 - `README.md`
 
-When a source inventory is present, also deliver `source_feature_coverage.json`.
-It is the pre-render gate identifying source-visible features that are mapped,
-not observable, or still need a class/content mapping. When a Word ledger is
-available, its `ledger_role_audit` must separately identify source-backed
-mappings, missing mappings, and role mappings still pending visual confirmation.
+When explicit front-matter metadata types were observed, also deliver
+`metadata.tex` with commented typed field skeletons and a commented input
+entry in `main.tex`.
 
-Include `source_inventory.json` when source inspection was performed or when enough evidence exists to make it useful. Include `word_format_ledger.json` whenever a readable Word source made paragraph-and-run mapping possible. If PDF comparison was completed, also include:
+When the Word source was legacy DOC, DOT, or RTF and a converted DOCX supplied
+structured inspection evidence, also retain the hash-bound derived DOCX at the
+package-relative path recorded in `word_format_ledger.json`.
 
-- `render_compare_report.json`
-- `layout_profile/`
-- `diff_previews/`
-- `promotion_report.json` when a page/body/placement/float-spacing render probe was accepted and the final spec contains `render_verified` calibration
+When the source was inspectable, also retain `source_inventory.json`,
+`word_format_ledger.json`, atomic decisions/audit, and the relevant mapping or
+system-triage records. When rendering ran, also provide the compile report,
+comparison report, layout profile, and diff previews as applicable. When a
+tool is unavailable, the README must give exact rerun commands and pending
+checks rather than treating tool absence as a conversion failure.
 
-For sources with active section-specific header/footer parts, also include the
-generated `page-furniture.tex` candidate. It is an evidence-preserving,
-commented file and must not be treated as globally active without a semantic
-boundary and same-content PDF check.
+`HANDOFF_STATUS.md` must state the current phase, whether ordinary handoff is
+ready, ready with pending local verification, or blocked, package-validation
+state, package fingerprint, verification environment, completed checks, and
+the exact next action. A generated or partially audited package is a
+continuation checkpoint, not a source-faithful completion.
 
-For official-LaTeX regression or skill training runs, also deliver the relevant regression artifacts: `manifest.json`, `source_manifest.json`, `case_report.json`, `evaluation.json`, `grading.json`, `benchmark.json`, `benchmark.md`, and `review.html` when review generation is requested.
-
-## Format Coverage Matrix
-
-Before handoff, cover every applicable row. A missing source rule is not a
-reason to omit the module; use the documented default and write the gap.
-
-| Module | Source evidence to inspect | Editable LaTeX owner | When evidence is incomplete |
-| --- | --- | --- | --- |
-| Cover or first page | Word first-page section, `titlePg`, first header/footer, rendered page 1 | `journalcover`, title-page code in `journal-template.cls` | Record a first-page candidate; do not insert a standalone cover without rendered proof. |
-| Metadata | Used title, author, affiliation, correspondence styles and direct paragraphs | `\title`, `\author`, `\affiliation`, `\maketitle` | Preserve Word default left alignment when no `jc` exists; centre only with evidence/default. |
-| Abstract and keywords | Label/content paragraph indexes, inline/separate/no-label structure, content box, language order, distinct label/content/keyword styles, adjacent paragraph spacing | class-owned abstract environment and keyword helper | Do not inherit the base class abstract layout or infer run-in labels from indentation. Emit every adjacent role boundary once and log defaults. |
-| Contents | Word TOC field or explicit author instruction | `\tableofcontents` in `main.tex` | A Contents heading alone is only a render-check candidate. |
-| Body and headings | Effective Word style chain, page/body box, numbering, line spacing | class geometry, body helpers, `titlesec` rules | Preserve source evidence and use conservative language defaults. |
-| Lists | Word paragraph/style `numPr`, `numbering.xml`, level, label format, and indent | `journalitemize`, `journalenumerate` | Do not confuse numbered list items with headings; retain restart/label geometry as a render-check candidate. |
-| Equations | OMML display/inline context, visible number samples, table-cell wrappers | `journalequation`, `amsmath`, appendix counters | Do not pretend OMML was converted to source LaTeX; retain the equation fixture and log unverified number placement. |
-| Tables and figures | Caption styles, object adjacency, facing-side spacing ledger, object paragraph and containing section, local column/page width, grid/merges, table header fill/repeat/height/alignment, cell-local paragraph/run spans, body drawing dimensions, assets | ordinary and wide journal float helpers, table/header helpers, caption setup, assets | Resolve width against the local Word column and caption gap from the two facing paragraph sides. Promote a shared header font only when every first-row cell establishes the same effective formatting; otherwise retain cell-local spans as evidence rather than flattening them. Replay source cells only for a bounded, unambiguous table and log complex cells as coverage gaps. Use a wide helper only with source-backed span evidence. Keep uncertain geometry editable and verify flow by rendering. |
-| Notes | Visible Word footnote paragraphs and author-note rules | `\footnote`, `\thanks`, footnote class setup | Separator nodes alone are not format evidence; retain normal LaTeX notes and log verification. |
-| Endnotes | Visible Word endnote paragraphs, placement instruction, marker sequence | `\journalendnote`, `\printjournalendnotes` | Ignore Word separator-only nodes; enable endnotes only with visible text evidence and log placement verification. |
-| References | Entry font, indents, citation guidance, official `.bst` | bibliography hooks, `references.bib` | Apply fixed source indent when backend-safe; keep label-dependent hanging indent pending. |
-| Appendices | Section label, boundary, and equation/table/figure examples | `\journalappendix` | Verify `A.1` counters. Keep flow continuous unless an isolated same-content probe proves appendix is the sole shifted anchor and a new-page boundary passes strict promotion. |
-
-## Completion Criteria
-
-Ordinary conversion is complete when:
-
-- The required package files exist and are editable.
-- `journal-template.cls` owns class-level formatting and `main.tex` demonstrates correct usage.
-- `template_spec.json` records official evidence, inferred rules, defaults, and source gaps.
-- `format_gap_log.md` names unsupported or ambiguous requirements instead of hiding them.
-- `source_feature_coverage.json` records whether every observable source feature has an editable LaTeX owner; priority gaps are addressed or explicitly retained as gaps before visual calibration.
-- Every source-backed visual claim has a recorded evidence location; zones supported only by defaults are named as unverified defaults, not described as matched.
-- `README.md` explains how to compile, how to rerun optional visual checks, and which verification stages were completed or pending.
-- Required content zones are represented by compileable `main.tex` examples: title/cover when relevant, author metadata, abstract, keywords, headings, body paragraphs, tables, figures, equations when relevant, footnotes, references, and appendices. A class interface without an exercised example is incomplete.
-- Chinese templates use CJK-safe XeLaTeX defaults and language-consistent editable examples through body, floats, references, and appendices; English templates avoid unnecessary CJK machinery.
-
-Verification is complete when local tools allow it and:
-
-- The generated LaTeX compiles without fatal errors after the final `main.tex` and class edits.
-- The best available renderer produced a reference PDF from the original Word/PDF source when applicable.
-- The generated PDF was compared against the reference PDF or official LaTeX golden PDF.
-- The comparison report records page count, page size, required zones, visual diff previews, and prioritized layout issues.
-
-Skill training or official-LaTeX regression is complete only under explicit benchmark work. A regression case passes only when official source evidence is recorded, both normalized PDFs compile, page count and page size gates pass, required zones are present in both PDFs, and visual thresholds pass. Keep `not_comparable` strict; replace or fix a case rather than lowering the gate.
+When structured inspection or audit helpers were unavailable, retain
+`manual_evidence_ledger.md` and `manual_mapping_audit.md` instead. They must
+cover every applicable required zone and preserve the same source/default/gap
+distinction; a manual record is not optional merely because the package cannot
+be compiled locally.
 
 ## Optional Tooling
 
-These bundled scripts are optional accelerators for deterministic extraction, rendering, generation, and regression. Use them when the execution environment supports them. If a script or dependency is unavailable, perform the same reasoning manually and record the unavailable verification stage.
+Scripts accelerate deterministic work but never replace model judgement. Use
+them when available; otherwise make the same evidence/mapping decisions
+manually and record the unavailable verification stage.
 
-- `scripts/inspect_sources.py <source> --output source_inventory.json`
-  Extract source file metadata and DOCX/PDF structural signals. It detects OpenXML by package contents before trusting the filename; only true legacy `.doc`, `.dot`, and `.rtf` files use LibreOffice when available to create a temporary DOCX for structural inspection.
-- `scripts/build_word_format_ledger.py official-template.docx --output word_format_ledger.json`
-  Build the mandatory Word-to-LaTeX mapping worklist for a readable OpenXML template. It retains every visible Word paragraph and contiguous run-format span, assigns evidence IDs and role candidates, preserves tables/drawings/notes separately, and names the intended editable LaTeX owner. Resolve this ledger before generating a class; it is not a substitute for a visible PDF check.
-- `scripts/render_docx_reference.py <docx> --outdir reference-render`
-  Render the original DOC/DOCX through available engines and choose a reference PDF.
-- `scripts/draft_spec_from_inventory.py source_inventory.json --notes official_notes.txt --output template_spec.json`
-  Draft a first `template_spec.json` from extracted source signals and official guide notes. When a heading style lacks a size, fill only that field from role-matched explicit Word template prose while retaining the instruction sentence and paragraph index.
-- `scripts/generate_latex_package.py template_spec.json --outdir latex-package [--word-source official-template.docx] [--source-inventory source_inventory.json] [--format-ledger word_format_ledger.json] [--promotion-report promotion_report.json]`
-  Generate `main.tex`, `journal-template.cls`, bibliography placeholder, assets folders, and gap log. Add `--word-source official-template.docx` to copy embedded Word assets into `assets/` and write an asset manifest; add `--source-inventory source_inventory.json` and `--format-ledger word_format_ledger.json` to retain the audited evidence and paragraph/run mapping worklist in the output package. Pass `--promotion-report` only with an accepted report and a `render_verified` spec; the generated README then records the verified calibration without claiming that future manuscript content was compared. Use `--apply-source-header-assets` only after render comparison confirms the later-page Word header/footer candidate geometry. Use `--apply-first-page-furniture` only for a separately confirmed first-page candidate; it activates a distinct first-page style instead of reusing its furniture on later pages.
-- `scripts/extract_word_assets.py official-template.docx --outdir latex-package/assets`
-  Extract embedded Word media and record whether each asset is referenced by the body, header, or footer. DOCX/DOTX/DOTM are read directly; legacy DOC/DOT/RTF are converted through LibreOffice when available, while retaining the original file as evidence. EMF/WMF assets receive a PNG companion when conversion succeeds; use `latex_output` from the asset manifest rather than embedding a metafile directly. Use before reproducing cover or page-style assets when generation is not invoked with `--word-source`.
-- `scripts/compile_latex_package.py latex-package/main.tex --output compile_report.json`
-  Compile the generated LaTeX package with latexmk or a direct TeX engine and record the result. It removes a same-named old PDF before compiling and publishes `pdf` only after every required command succeeds; a PDF written before a fatal TeX error is recorded only as `partial_pdf` and must never enter comparison.
-- `scripts/validate_latex_package.py latex-package --output package_validation.json`
-  Check the ordinary package contract before handoff: required editable files/directories, valid spec JSON, all required evidence sections, language/engine/page-frame decisions, fallback-record shape, unresolved generator placeholders, absolute local paths, and basic README/gap-log completeness. It does not replace compilation or PDF comparison.
-- `scripts/compare_pdfs.py reference.pdf generated.pdf --outdir render-compare`
-  Render both PDFs to page images and produce raw and graphics-insensitive format diffs plus a JSON comparison report. The format metric masks only raster image interiors while retaining image geometry, captions, page flow, tables, and text.
-- `scripts/profile_pdf_layout.py reference.pdf generated.pdf --outdir layout-profile [--anchors-json anchors.json]`
-  Extract body-only text boxes, semantic anchors (including phrases wrapped across nearby overlapping lines), line gaps, same-column baseline steps, font-size medians, header/footer occupancy, and image counts from PDFs, then summarize likely visual-failure causes and non-automatic calibration hints. The built-in unique anchors match only the bundled regression fixture. For any other same-content manuscript, supply unique zone phrases with `--anchors-json`; never use generic words such as `Table`, `Figure`, or `References` as anchors.
-  Treat the map as a role-level same-content contract. If
-  `semantic_comparable` is false, `same_content_contract_status` is not
-  `passed`, or shared and required anchor counts differ, treat the pair as
-  `not_comparable` for layout calibration and do not change the class.
-  A passed text contract proves shared fixture content only; require a passed
-  positioned geometry contract for every declared role before using page or
-  spacing measurements to alter the class.
-  PyMuPDF is preferred; a pdfplumber fallback can provide geometry diagnostics
-  but does not replace visual review.
-- `scripts/suggest_page_calibration.py template_spec.json layout-profile/layout_diagnostics.json --output page_render_calibration_proposal.json`
-  Produce a `pending` page-margin proposal from small, consistent text-box edge deltas. It never edits the spec or marks a calibration verified; large displacement is rejected as likely content-flow or float behavior that needs structural repair first.
-- `scripts/materialize_page_calibration_candidate.py template_spec.json page_render_calibration_proposal.json --output candidate_spec.json`
-  Create a separate `render_probe` spec for explicit regression only. Generate its candidate package with `generate_latex_package.py candidate_spec.json --apply-render-probe`; never replace the ordinary source spec unless the same-content comparison accepts the candidate.
-- `scripts/suggest_body_calibration.py template_spec.json layout-profile/layout_diagnostics.json --output body_render_calibration_proposal.json [--allow-page-count-repair]`
-  Propose a bounded body-font/baseline candidate when page count, body width, anchor pages, and cross-page measurements are stable. For an output that is too long, `--allow-page-count-repair` permits one isolated tightening candidate only when at least two pages are comparable, every measured anchor shifts later, body-box width is within 30pt, and the generated body font is stably at least 1pt too large. Other pagination signatures return `candidate_available: false`; never force them into the class.
-- `scripts/materialize_body_calibration_candidate.py template_spec.json body_render_calibration_proposal.json --output candidate_spec.json`
-  Create a separate `document.render_calibration.status=render_probe` spec, retaining whether it is stable calibration or body-density page-count repair. Generate it with `--apply-render-probe`, compare the same content against both the reference and ordinary package, and retain it only when structural gates stay satisfied and visual metrics improve.
-- `scripts/promote_render_probe.py template_spec.json candidate_spec.json --ordinary-compare ordinary/render_compare_report.json --candidate-compare candidate/render_compare_report.json --ordinary-layout ordinary/layout_diagnostics.json --candidate-layout candidate/layout_diagnostics.json --candidate-compile candidate_compile_report.json --output verified_spec.json --report promotion_report.json`
-  Close the page/body/placement/float-spacing/backmatter/appendix-boundary calibration loop without relying on informal model judgment. Compare the spec copies from the ordinary and candidate generated packages when `--word-source` added relative asset-manifest metadata; do not compare a pre-extraction source spec with a post-extraction candidate spec. The tool permits changes only under the documented calibration paths; requires the same reference PDF, successful candidate compilation, matching repaired page count and size, no new anchor failures, and the path-specific visual/layout improvements. It writes a portable `render_verified` spec only when every gate passes. A rejected probe produces only the report and must not replace the ordinary package.
-- `scripts/preflight_corpus.py --manifest <manifest.json> --outdir <preflight-dir> [--cases <case_id> ...]`
-  Admit corpus candidates before expensive regression by validating the official Word payload, recording its hash, and rendering it to a reference PDF. Missing official LaTeX is allowed; inaccessible or non-renderable Word sources are rejected or replaced.
-- `scripts/normalize_word_stress.py official-template.docx --output normalized.docx --report word_normalization_report.json [--fixture-language en|zh|mixed] [--fixture-profile stress|latex-default]`
-  For explicit regression only, create a working copy containing the fixed representative fixture while retaining role styles, explicit continuous front-matter-to-body column transitions, and inherited header/footer references. Select `zh` or `mixed` for Chinese and bilingual templates so the reference does not test English-only content. Use `--fixture-profile latex-default` when comparing against the package's generated editable fixture: it aligns the fixed fields and content order rather than measuring two different placeholder manuscripts. Never overwrite the official Word artifact. Reject or repair a normalized reference that changes section flow before using it to train the skill; treat unsuccessful normalization as `not_comparable`, not as a reason to compare unrelated placeholder pages.
-- `scripts/run_regression.py --manifest <manifest.json> --outdir <iteration-dir> [--cases <case_id> ...] [--variant-search] [--source-font-probe] [--heading-color-probe] [--reference-layout-probe] [--body-style-probe] [--figure-placement-probe] [--table-placement-probe] [--float-spacing-probe] [--table-geometry-probe] [--text-box-placement-probe] [--backmatter-boundary-probe] [--appendix-boundary-probe] [--furniture-geometry-probe] [--first-page-furniture-probe] [--review]`
-  Run the corpus only for explicit comparison or skill training. `--backmatter-boundary-probe` tests one new-page boundary before acknowledgements/data/references only when those late anchors shift together and generated output is too short. `--appendix-boundary-probe` is narrower and requires appendix alone to shift. Neither changes ordinary output without strict PDF promotion.
-- `scripts/analyze_regression_training.py --run batch=iteration-dir ... --output-json training_signal.json --output-md training_signal.md`
-  Aggregate multiple regression runs into a training-signal report for skill improvement.
+| Need | Preferred helper |
+| --- | --- |
+| Inspect source payloads | `inspect_sources.py` |
+| Build Word paragraph/run/object ledger | `build_word_format_ledger.py` |
+| Audit paragraph/run/cell/furniture capture completeness | `audit_word_capture_coverage.py` |
+| Audit object/caption relations and machine-readable decision limits | `audit_caption_relations.py` |
+| Prepare or merge a bounded mapping batch | `prepare_atomic_mapping_review.py`, `apply_atomic_mapping_batch.py` |
+| Prepare a front-matter semantic confirmation | `prepare_front_matter_confirmation.py` |
+| Reconcile a regenerated ledger | `reconcile_atomic_mapping_decisions.py` |
+| Audit mappings and system evidence | `prepare_system_format_triage.py` to initialize or reopen a ledger-matched child queue; use `--existing --systems --pending-only --batch-size --review-order priority` for an explainable stable review batch, then `audit_atomic_mapping.py` |
+| Draft spec and generate package | `draft_spec_from_inventory.py`, `generate_latex_package.py` |
+| Extract Word assets | `extract_word_assets.py` |
+| Compile and validate package | `compile_latex_package.py`, `validate_latex_package.py` |
+| Assess next safe action | `assess_conversion_readiness.py` |
+| Render and compare PDFs | `render_docx_reference.py`, `compare_pdfs.py`, `profile_pdf_layout.py` |
+| Train or compare deterministic corpus tooling | `run_regression.py`; read `references/llm-skill-evaluation.md` for actual loaded-skill model evaluation |
 
-Patch scripts only when source evidence or training results show a reusable need. Keep script outputs in the project folder so the conversion can be audited.
+Use `--help` for the current command contract. `assess_conversion_readiness.py`
+is the source of truth for whether the next step is mapping, compilation,
+visual repair, verification, or a safe continuation checkpoint. A missing or
+fingerprint-mismatched system-format triage blocks its mapping-slice output;
+create the triage queue first instead of sending a model contradictory work.
+
+Treat every explicit `--output` path as a fresh per-journal workspace. Helpers
+must create its parent directory rather than requiring an agent to pre-create
+it. For legacy DOC, DOT, or RTF inspection, retain the original file as the
+authority and mark any temporary LibreOffice DOCX as a derived inspection
+artifact, not a replacement source.
+
+## Completion States
+
+An ordinary conversion may be handed off when the editable package contract is
+present, source/default/gap records are honest, all applicable source units are
+mapped or explicitly retained, and completed versus pending checks are clear.
+
+Call the result source-faithful only when the applicable Word mapping audit is
+complete, the package compiles, required zones exist, and any available
+same-content visual check has been assessed without unresolved critical gaps.
+
+For skill changes, do not use one journal as proof. Run affected cases first,
+then the representative set and required corpus manifests. A corpus metric is
+training evidence; it does not replace the per-journal ledger.
 
 ## Guardrails
 
-- Do not turn a normal single-journal conversion into the full regression suite.
-- Do not invent official requirements. When evidence is missing, use defaults and label them as defaults.
-- Do not stop merely because local render tools are missing. Deliver the LaTeX package plus a verification plan.
-- Do not deliver an opaque converted manuscript as the template. The output must be maintainable LaTeX.
-- Do not optimize one journal with brittle hard-coded layout rules unless the rule is source-evidence driven and generalizes.
+- Do not fabricate publisher requirements or hide uncertainty behind a generic
+  default.
+- Do not use an official LaTeX package as the primary rule when the task is to
+  reconstruct an official Word template; it is supporting comparison evidence.
+- Do not compare unrelated Word and LaTeX samples. Use the same representative
+  fixture or mark the pair not comparable.
+- Do not let local tool failure, an attractive PDF score, or a compiling file
+  bypass evidence capture, atomic mapping, or the gap log.
+- Do not commit, push, tag, or release this skill unless the user explicitly
+  confirms that publication action.

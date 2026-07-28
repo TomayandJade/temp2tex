@@ -9,9 +9,10 @@ traced to the official Word template and supporting official evidence.
 
 Keep this invariant visible in working notes:
 
-> Every observable source formatting decision has one of four outcomes:
+> Every observable source formatting decision has one of five outcomes:
 > mapped to an editable LaTeX owner, recorded as a justified default, retained
-> as an unresolved gap, or marked not observable.
+> as an unresolved gap, marked not observable, or classified as non-format
+> guidance with a reason.
 
 ## Mandatory Working Ledger
 
@@ -26,7 +27,7 @@ the source cannot be parsed.
 | Observed format | Text, font, size, emphasis, spacing, alignment, geometry, numbering, or object relationship |
 | Authority | official Word, official instruction, official PDF, inferred, or default |
 | LaTeX owner | exact class macro/environment/file that will own the behavior |
-| Status | `mapped`, `needs_mapping`, `default`, `unresolved`, or `not_observable` |
+| Status | `mapped`, `needs_mapping`, `default`, `guidance`, `unresolved`, or `not_observable`; guidance also has a declared semantic kind |
 | Audit | compilation check, visual check, or explicit reason it is pending |
 
 Do not replace the ledger with prose summaries. Do not claim a role is mapped
@@ -67,11 +68,37 @@ style. Resolve title, authors, affiliations, abstract, keywords, each heading
 level, body, lists, equations, tables, figures, notes, references, appendix,
 and page furniture independently where applicable.
 
-For each visible paragraph, retain its paragraph formatting and every
-contiguous run-format span. For objects, retain the local section, dimensions,
+For a large, legacy, or unfamiliar Word source, run
+`audit_word_capture_coverage.py` before starting atomic mapping. A
+`capture_complete` result is a source-extraction gate only, not a mapping or
+fidelity claim. `captured_sparse_or_empty` means the official template has no
+visible body exemplar; use stronger official material or a documented default.
+`capture_incomplete` blocks the strict mapping audit and visual calibration
+until the named capture limitation is resolved.
+
+For each visible body/table paragraph and each visible header/footer, note, or
+text-box paragraph, retain its paragraph formatting and every contiguous
+run-format span. Create an independent audit unit for every observable table
+grid/header/width/merge structure and drawing placement; do not assume the
+nearby caption or cell text owns that geometry. For objects, retain the local section, dimensions,
 caption relation, and immediate surrounding paragraph spacing. For tables,
 retain column widths, borders, fills, merges, cell alignment, and cell-local
-text formatting. Do not treat a table as an image.
+text formatting. For lists, retain every list item plus its independent
+numbering-system unit, including label family, start/restart, levels, and
+left/hanging indentation. Do not treat a table as an image or a list as an
+ordinary body paragraph.
+
+Treat layout-only runs separately from ordinary whitespace. Tabs, line breaks,
+non-breaking spaces, and whitespace with direct run formatting receive a
+`run_layout` decision because they can carry table, header, field, or inline
+spacing semantics. Plain inherited spaces remain under the parent paragraph.
+Do not drop a formatted separator merely because it has no letters.
+
+For every OMML formula, retain a formula-instance unit with its convertible or
+manual-translation structure, local paragraph alignment, display/inline state,
+and adjacent visible number. Retain a separate equation-system unit for the
+counter, tag form, number placement, spacing, and appendix interaction. Do not
+call the equation matched merely because an `amsmath` fixture compiles.
 
 Word comments never become manuscript content. Adopt a comment as formatting
 evidence only when all of the following hold:
@@ -86,10 +113,20 @@ evidence only when all of the following hold:
 Record the comment ID, anchor, wording, and conflict result in the ledger and
 spec. Otherwise retain it as non-binding guidance.
 
-**Exit gate:** every applicable zone has evidence IDs or `not_observable`.
+**Exit gate:** `word_format_ledger.json.coverage.all_visible_text_units_captured`
+and `all_observable_object_units_captured` are true, every applicable zone has
+evidence IDs or `not_observable`.
 For each applicable zone, every selected paragraph/run, table cell, drawing,
 note, or furniture item has passed the atomic loop or remains explicitly in
 the unresolved queue.
+
+If `front_matter_sequence_review.requires_semantic_confirmation` is true,
+run `prepare_front_matter_confirmation.py word_format_ledger.json --output
+front_matter_semantic_confirmation.json`. Confirm every ordered title, author,
+affiliation, and metadata record from its visible Word context. The completed
+file must match the ledger fingerprint and retain the proposed role. An
+evidence disagreement stays open instead of being relabelled silently. Rerun
+`assess_conversion_readiness.py` before an ordinary mapping batch.
 
 ### 2. Mapping
 
@@ -104,6 +141,46 @@ unresolved roles visible rather than guessing a rule.
 
 **Exit gate:** each role is `mapped`, `default`, `unresolved`, or
 `not_observable`, with a named owner or an explicit gap.
+
+For a large ledger, do not force a one-turn completion or silently abandon
+the queue. First select one coherent source-backed concern with `--roles`
+(for example `page.frame,page.columns` or `table.structure,table.caption`),
+then create a stable 20-group review batch inside that selection. Complete
+only its final dispositions, merge it through the fingerprint-bound batch
+tool, then rerun the atomic audit and readiness report. The role filter is
+only a work-order mechanism: it never hides other pending groups or weakens
+the audit gate. A package with a
+complete ledger, preserved decisions, a bounded next batch, and
+`checkpoint_handoff.status=ready_for_next_mapping_batch` is a valid
+continuation checkpoint. It is not an ordinary completed handoff, it does not
+authorize calibration, and it must state the exact next batch rather than
+asking a later model to rediscover the source.
+
+System aggregates are a separate queue that must be created before ordinary
+mapping, not a requirement to finalize every child before a title, body, or
+table mapping batch can start. Text-grid, tab-stop, paragraph-break,
+character-effect, character-style, script/language, theme, and unmodeled OOXML
+evidence must be split into child records in `system_format_triage.json`.
+Follow the readiness report's next ordinary `recommended_mapping_slice`, then
+reopen the system queue to review children whose linked role now has final
+ordinary context. Review those children in a stable pending-only priority
+batch, preserving their locator, observed value, and displayed review-order
+reason. The priority only orders work: it never supplies a disposition, hides
+a child, or lowers the strict-audit gate. Use `--review-order source-order`
+when a forensic source-order recheck is needed. Do not include a system
+aggregate in a normal `--roles` mapping batch or close it with a generic class
+token; strict audit accepts it only through its child dispositions. Every
+strict audit is bound to the exact serialized triage queue. After any child
+edit, rerun the audit before coverage refresh, package validation, visual
+calibration, or a fidelity claim. A stale child-triage audit cannot be used to
+select a visual repair evidence scope, even when its Word ledger fingerprint
+still matches.
+
+Run `assess_conversion_readiness.py` after each merge and carry forward its
+`recommended_mapping_slice` when it exists. The suggested `--roles` list is
+derived from pending source-backed audit units in dependency order. Generate a
+batch inside that slice before returning to the full queue. It is a work-order
+hint only: do not remove, down-rank, or declare complete the unselected units.
 
 ### 3. Build
 
@@ -127,6 +204,10 @@ Audit in this order:
    dates, correspondence, or typography guidance; that captions are actual
    caption exemplars rather than instructions; and that table-cell evidence is
    audited as text plus grid geometry, not flattened into an image.
+   Confirm the audit used a v3 ledger and `atomic_mapping_audit.json.audit_complete` is true, then rerun
+   `source_feature_coverage.json` with that atomic-audit artifact. A coverage
+   report that lacks complete source capture or completed atomic dispositions
+   cannot authorize visual calibration.
 2. **Ownership audit:** every mapped requirement has one editable LaTeX owner;
    no formatting logic is hidden in a flattened converted manuscript.
 3. **Compile audit:** final `main.tex` and class compile without fatal errors.
@@ -134,7 +215,11 @@ Audit in this order:
    figure/caption, notes, references, and appendix are present where required.
 5. **Visual audit:** compare same-content source and generated PDFs when
    available. Repair source-backed differences one at a time, then repeat the
-   affected checks.
+   affected checks. Combine two probes only when the same Word evidence shows
+   that the two roles are coupled in one manuscript-flow decision, both
+   isolated probes have been measured on the identical fixture, and the
+   combined candidate is retained as a bounded `render_probe` pending strict
+   promotion. Never create a cross-product search from visual scores.
 
 For visual audit, image *content* may differ. Mask only raster image interiors
 when calculating an image-insensitive metric. Continue checking image box
@@ -155,6 +240,17 @@ Hand off an editable package with a clear boundary between official rules,
 inferences, and defaults. The README must state what was checked and what
 remains pending. Never call an unrendered or unresolved role visually matched.
 
+Use `HANDOFF_STATUS.md` as an executable boundary, not a summary. A package
+with unfinished evidence or atomic mapping remains `Ordinary handoff: blocked`.
+After the final package validation, use `ready` only with `Package validation:
+valid`, the current package fingerprint, and `Verification environment:
+available`. When source mapping is complete but required local validation,
+TeX, or rendering tools are unavailable, use only
+`ready_with_pending_local_verification` with both validation and fingerprint
+marked pending, environment `unavailable`, and exact rerun commands. This is
+an editable delivery with an explicit local-check boundary, never a way to
+skip source or mapping work.
+
 ## Anti-Drift Checks
 
 Ask these questions before any new action:
@@ -168,6 +264,53 @@ If the answer to all three is no, do not perform it. Typical drift includes
 running a large corpus for a single journal, tuning generic pixel thresholds
 before mapping a missing caption, converting sample article prose into the
 template, or treating a missing local tool as a reason to stop.
+
+When artifacts are available, run `assess_conversion_readiness.py` before a
+new phase. Follow its `phase`, `next_actions`, and `blocked_actions`: a pending
+Word atomic audit blocks calibration and strict-pass claims, but an unavailable
+TeX/PDF tool may leave an editable package ready with a documented local
+verification step. Do not override this state from an attractive visual score.
+
+When a comparable PDF pair still fails visually, use
+`visual_repair_plan` from the readiness report before selecting a probe. Its
+order is binding for the next action: repair same-content fixture validity,
+then structural page flow, then a failed local furniture contract, front
+matter, object/caption flow, page frame, body density, or running furniture.
+It names the actions that remain blocked at that point. Do not skip directly
+to margins or font size because they are easy to vary; a visual repair plan is
+an evidence-bound work-order, not an invitation to search parameters.
+
+For every concern other than a broken same-content fixture, read
+`visual_repair_plan.evidence_review_scope` before editing the class. It names
+the exact ledger-matched audit units and their Word roles to revisit. For a
+structural-flow failure, its roles are narrowed to the page frame/column
+evidence plus the actual shifted anchor role; also inspect only the immediately
+adjacent Word paragraphs at that boundary. A missing or fingerprint-mismatched
+audit blocks source-rule selection. The scope is a readback list, not
+permission to change every listed unit.
+
+For repeated tables or figures, bind each rendered anchor to its exact current
+Word evidence IDs in the task anchor map. When readiness exposes
+`requested_evidence_ids`, use its `--evidence-ids` command path and inspect
+only those source objects plus their immediate caption/flow context. If an ID
+is not present in the ledger-matched audit, repair the anchor contract or audit
+first; do not fall back to all objects sharing the same role.
+
+Before an object/caption result enters a class rule, a float probe, or an
+anchor contract, read its caption-relation `evidence_disposition`. Only
+`confirmed_source_relation` can propose order, object-facing spacing, or a
+per-object anchor. `remote_caption_candidate`, `label_mismatch`,
+`ambiguous_source_relation`, and `no_observed_caption_relation` have explicit
+prohibitions; follow them even when their Word paragraphs look visually close.
+The first three states require a rendered or otherwise stronger source check;
+the last may provide local geometry only. Never turn an audit warning into a
+generic publisher-wide caption rule.
+
+Treat `checkpoint_handoff` independently from `ordinary_handoff`. The former
+answers whether another model can safely continue from current evidence; the
+latter answers whether the conversion is complete enough to hand off as a
+finished Word-derived template. Never turn a continuation checkpoint into a
+fidelity claim merely because its LaTeX files compile.
 
 Also stop and return to the ledger when an action proposes a global class
 change from one paragraph, suppresses a role because it is hard to render, or

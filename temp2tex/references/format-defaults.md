@@ -40,6 +40,23 @@ Use these defaults only when official sources are incomplete. Add every default 
 
 For mixed Chinese/English templates, prefer `journal-template.cls` with a CJK-safe base such as `ctexart` and explicit English font settings. Keep bilingual abstract order and labels source-backed. If the source does not define order, use Chinese abstract first for Chinese-first journals and English abstract first for English-first journals.
 
+When body metrics are missing for a `zh` or `mixed` template, use the CJK-safe
+fallback of `2em` first-line indentation and `1.3` line spacing. Record both
+the values and the `zh`/`mixed` default profile in `format_gap_log.md`; do not
+inherit the English `1.5em`/`1.15` fallback merely because the package contains
+Latin text.
+
+When the official material has no abstract length limit, do not invent one.
+For `zh`, record a concise Chinese-abstract default; for `mixed`, record a
+concise source-language abstract-block default; for `en`, record the English
+default. The language label in `format_gap_log.md` must match the inferred
+template language.
+
+Apply the same rule to keyword counts. Only record a source count when the
+guidance explicitly limits `Keywords` or `关键词`; otherwise keep the count
+unset and record a language-matched concise-list default. Do not derive a count
+from the number of sample keywords in a Word template.
+
 Record Latin and East Asian font evidence separately. Do not silently apply a
 Word CJK font name merely because it appeared in OOXML: set
 `cjk_font_mode: "verified"` only after the local font exists and PDF comparison

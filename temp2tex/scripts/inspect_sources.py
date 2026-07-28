@@ -25,12 +25,13 @@ R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PACKAGE_R_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 WP14_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
+W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
 WPS_NS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 V_NS = "urn:schemas-microsoft-com:vml"
 O_NS = "urn:schemas-microsoft-com:office:office"
-NS = {"w": W_NS, "r": R_NS, "wp": WP_NS, "a": A_NS, "m": M_NS, "v": V_NS, "o": O_NS}
+NS = {"w": W_NS, "w14": W14_NS, "r": R_NS, "wp": WP_NS, "a": A_NS, "m": M_NS, "v": V_NS, "o": O_NS}
 KNOWN_HEADINGS = {
     "abstract",
     "introduction",
@@ -171,7 +172,20 @@ def vml_shape_samples(root: ET.Element | None, part: str, relationships: dict[st
                     key, value = (part.strip() for part in item.split(":", 1))
                     if key and value:
                         style[key] = value
-            shapes.append({"id": node.attrib.get("id"), "kind": node.tag.rsplit("}", 1)[-1], "type": node.attrib.get("type"), "style": style})
+            shape = {
+                "id": node.attrib.get("id"),
+                "kind": node.tag.rsplit("}", 1)[-1],
+                "type": node.attrib.get("type"),
+                "style": style,
+            }
+            if node.tag == f"{{{V_NS}}}line":
+                shape.update({
+                    "from": node.attrib.get("from"),
+                    "to": node.attrib.get("to"),
+                    "strokeweight": node.attrib.get("strokeweight"),
+                    "strokecolor": node.attrib.get("strokecolor"),
+                })
+            shapes.append(shape)
         ole = pict.find(".//o:OLEObject", NS)
         samples.append({
             "index": index, "part": part, "paragraph_index_in_part": paragraph_index,
@@ -289,31 +303,142 @@ def caption_kind(text: str, style_name: str | None = None) -> tuple[str | None, 
     return None, None
 
 
-def nearest_caption_relation(captions: list[dict], kind: str, start: int, end: int) -> dict:
+def caption_label(text: object, kind: str) -> str | None:
+    """Extract an explicit Figure/Table label for source-object matching."""
+    prefix = r"(?:table\b|tab\.|\u8868)" if kind == "table" else r"(?:figure\b|fig\.|\u56fe|\u56fe\u7247)"
+    match = re.match(r"^\s*" + prefix + r"\s*([0-9]+|[ivxlcdm]+|[A-Za-z])(?:[.:]\s|\s|$)", str(text or ""), re.I)
+    return match.group(1).casefold() if match else None
+
+
+def caption_relation_disposition(relation: dict) -> dict:
+    """Bound the decisions that a source caption relation may authorize."""
+    confidence = str(relation.get("confidence") or "not_detected")
+    position = str(relation.get("position") or "unknown")
+    if confidence in {"adjacent", "nearby"} and position in {"above", "below"}:
+        return {
+            "state": "confirmed_source_relation",
+            "may_drive": [
+                "caption_order_candidate",
+                "object_caption_gap_candidate",
+                "object_specific_pdf_anchor_candidate",
+            ],
+            "must_not_drive": [],
+        }
+    if confidence == "distant":
+        return {
+            "state": "remote_caption_candidate",
+            "may_drive": ["caption_typography_candidate_if_independently_selected"],
+            "must_not_drive": ["caption_order", "object_caption_gap", "float_policy", "object_specific_pdf_anchor"],
+        }
+    if confidence == "label_mismatch":
+        return {
+            "state": "label_mismatch",
+            "may_drive": [],
+            "must_not_drive": ["caption_order", "caption_spacing", "float_policy", "object_specific_pdf_anchor"],
+        }
+    if confidence == "ambiguous":
+        return {
+            "state": "ambiguous_source_relation",
+            "may_drive": [],
+            "must_not_drive": ["caption_order", "object_caption_gap", "float_policy", "object_specific_pdf_anchor"],
+        }
+    return {
+        "state": "no_observed_caption_relation",
+        "may_drive": ["local_object_geometry_candidate"],
+        "must_not_drive": ["caption_order", "caption_spacing", "float_policy", "object_specific_pdf_anchor"],
+    }
+
+
+def finalize_caption_relation(relation: dict) -> dict:
+    relation["evidence_disposition"] = caption_relation_disposition(relation)
+    return relation
+
+
+def nearest_caption_relation(
+    captions: list[dict],
+    kind: str,
+    start: int,
+    end: int,
+    object_ordinal: int | None = None,
+) -> dict:
+    """Match a caption by explicit label first, then safe local proximity.
+
+    Word often stores a drawing paragraph between an above and below caption.
+    A distance-only tie break silently chooses the earlier paragraph, even when
+    the later `Figure N` label matches the object.  Preserve a tie as
+    unresolved rather than inventing a relation that would later drive float
+    placement or an object-specific PDF anchor.
+    """
     candidates = []
     for caption in captions:
-        if caption.get("kind") != kind:
-            continue
-        # Caption-like text inside a table cell can be a header or note. It
-        # does not prove the order of an external LaTeX caption.
-        if caption.get("in_table_cell"):
+        if caption.get("kind") != kind or caption.get("in_table_cell"):
             continue
         index = int(caption.get("paragraph_index") or 0)
         if start <= index <= end:
-            position = "inside"
-            distance = 0
+            position, distance = "inside", 0
         elif index < start:
-            position = "above"
-            distance = start - index
+            position, distance = "above", start - index
         else:
-            position = "below"
-            distance = index - end
+            position, distance = "below", index - end
         candidates.append((distance, index, position, caption))
     if not candidates:
-        return {"position": "unknown", "confidence": "not_detected"}
-    distance, index, position, caption = min(candidates, key=lambda item: (item[0], item[1]))
+        return finalize_caption_relation({"position": "unknown", "confidence": "not_detected"})
+
+    target_label = str(object_ordinal).casefold() if isinstance(object_ordinal, int) and object_ordinal > 0 else None
+    labelled_candidates = [item for item in candidates if str(item[3].get("label") or "").strip()]
+    labelled_matches = [
+        item for item in candidates
+        if target_label is not None and str(item[3].get("label") or "").casefold() == target_label
+    ]
+    if target_label is not None and labelled_candidates and not labelled_matches:
+        nearest_distance = min(item[0] for item in labelled_candidates)
+        nearest = [item for item in labelled_candidates if item[0] == nearest_distance]
+        return finalize_caption_relation({
+            "position": "unknown",
+            "confidence": "label_mismatch",
+            "paragraph_distance": nearest_distance,
+            "target_object_ordinal": object_ordinal,
+            "label_match": "mismatch",
+            "nearest_caption_candidates": [
+                {
+                    "position": item[2],
+                    "caption_paragraph_index": item[1],
+                    "caption_text": item[3].get("text"),
+                    "caption_label": item[3].get("label"),
+                    "caption_style_id": item[3].get("style_id"),
+                    "caption_style_name": item[3].get("style_name"),
+                    "classification_source": item[3].get("classification_source"),
+                }
+                for item in nearest
+            ],
+        })
+    candidate_pool = labelled_matches or candidates
+    nearest_distance = min(item[0] for item in candidate_pool)
+    nearest = [item for item in candidate_pool if item[0] == nearest_distance]
+    if len(nearest) > 1:
+        return finalize_caption_relation({
+            "position": "unknown",
+            "confidence": "ambiguous",
+            "paragraph_distance": nearest_distance,
+            "target_object_ordinal": object_ordinal,
+            "label_match": "matched" if labelled_matches else "not_available",
+            "nearest_caption_candidates": [
+                {
+                    "position": item[2],
+                    "caption_paragraph_index": item[1],
+                    "caption_text": item[3].get("text"),
+                    "caption_label": item[3].get("label"),
+                    "caption_style_id": item[3].get("style_id"),
+                    "caption_style_name": item[3].get("style_name"),
+                    "classification_source": item[3].get("classification_source"),
+                }
+                for item in nearest
+            ],
+        })
+
+    distance, index, position, caption = nearest[0]
     confidence = "adjacent" if distance <= 2 else "nearby" if distance <= 5 else "distant"
-    return {
+    candidate = {
         "position": position,
         "paragraph_distance": distance,
         "caption_paragraph_index": index,
@@ -321,8 +446,14 @@ def nearest_caption_relation(captions: list[dict], kind: str, start: int, end: i
         "caption_style_id": caption.get("style_id"),
         "caption_style_name": caption.get("style_name"),
         "classification_source": caption.get("classification_source"),
+        "caption_label": caption.get("label"),
+        "target_object_ordinal": object_ordinal,
+        "label_match": "matched" if labelled_matches else "not_available",
         "confidence": confidence,
     }
+    if confidence == "distant":
+        return finalize_caption_relation({"position": "unknown", "confidence": "distant", "nearest_caption_candidate": candidate})
+    return finalize_caption_relation(candidate)
 
 
 def textbox_geometry(root: ET.Element, box: ET.Element) -> dict:
@@ -429,7 +560,13 @@ def drawing_geometry(node: ET.Element) -> dict:
     return {key: value for key, value in values.items() if value not in (None, "")}
 
 
-def text_box_samples(root: ET.Element | None, part: str, paragraph_evidence=None) -> list[dict]:
+def text_box_samples(
+    root: ET.Element | None,
+    part: str,
+    paragraph_evidence=None,
+    *,
+    full_paragraph_evidence: bool = False,
+) -> list[dict]:
     """Capture non-flow Word/VML text as evidence without promoting it to body text."""
     if root is None:
         return []
@@ -477,8 +614,8 @@ def text_box_samples(root: ET.Element | None, part: str, paragraph_evidence=None
             "part": part,
             "text": text[:500],
             "paragraph_count": len(paragraphs),
-            "paragraphs": paragraph_records[:12],
-            "paragraphs_truncated": len(paragraph_records) > 12,
+            "paragraphs": paragraph_records if full_paragraph_evidence else paragraph_records[:12],
+            "paragraphs_truncated": not full_paragraph_evidence and len(paragraph_records) > 12,
             "geometry": geometry,
             "requires_visual_review": True,
         })
@@ -516,8 +653,8 @@ def text_box_samples(root: ET.Element | None, part: str, paragraph_evidence=None
             "part": part,
             "text": text[:500],
             "paragraph_count": len(paragraph_records),
-            "paragraphs": paragraph_records[:12],
-            "paragraphs_truncated": len(paragraph_records) > 12,
+            "paragraphs": paragraph_records if full_paragraph_evidence else paragraph_records[:12],
+            "paragraphs_truncated": not full_paragraph_evidence and len(paragraph_records) > 12,
             "geometry": geometry,
             "requires_visual_review": True,
         })
@@ -529,6 +666,7 @@ def equation_samples(root: ET.Element | None, part: str) -> list[dict]:
     if root is None:
         return []
     parents = {child: parent for parent in root.iter() for child in parent}
+    paragraph_indices = {id(paragraph): index for index, paragraph in enumerate(root.findall(".//w:p", NS), 1)}
     samples = []
     for index, math in enumerate(root.findall(".//m:oMath", NS), 1):
         current = math
@@ -556,9 +694,13 @@ def equation_samples(root: ET.Element | None, part: str) -> list[dict]:
         # paragraph containing only an equation plus a parenthesized number.
         display_like = bool(in_math_paragraph or not word_text or re.fullmatch(r"\s*(?:\([^)]*\))?\s*", word_text))
         conversion = convert_omml(math)
+        paragraph_properties = paragraph.find("w:pPr", NS) if paragraph is not None else None
         samples.append({
             "index": index,
             "part": part,
+            "paragraph_index": paragraph_indices.get(id(paragraph)) if paragraph is not None else None,
+            "paragraph_style_id": attr_val(paragraph_properties.find("w:pStyle", NS)) if paragraph_properties is not None else None,
+            "paragraph_direct_format": direct_format(paragraph_properties, None) if paragraph_properties is not None else {},
             "sample_text": math_text[:300],
             "word_text_outside_math": word_text[:300],
             "display_like": display_like,
@@ -590,6 +732,110 @@ def attrs(node: ET.Element | None) -> dict[str, str]:
     return {key.split("}")[-1]: value for key, value in node.attrib.items()}
 
 
+def table_box_sides(node: ET.Element | None) -> dict[str, dict[str, str]]:
+    """Preserve Word table or cell margin sides without assuming a LaTeX mapping."""
+    if node is None:
+        return {}
+    return {
+        child.tag.rsplit("}", 1)[-1]: attrs(child)
+        for child in list(node)
+        if child.tag.rsplit("}", 1)[-1] in {"top", "left", "bottom", "right", "start", "end"}
+    }
+
+
+def table_border_sides(node: ET.Element | None) -> dict[str, dict[str, str]]:
+    """Keep local table-cell border overrides distinct from table-wide borders."""
+    if node is None:
+        return {}
+    return {
+        child.tag.rsplit("}", 1)[-1]: attrs(child)
+        for child in list(node)
+    }
+
+
+def word_property_tree(node: ET.Element | None) -> dict | None:
+    """Retain nested Word property XML without selecting a rendered equivalent."""
+    if node is None:
+        return None
+    result = {"node": node.tag.rsplit("}", 1)[-1], "attributes": attrs(node)}
+    children = [word_property_tree(child) for child in list(node)]
+    children = [child for child in children if child is not None]
+    if children:
+        result["children"] = children
+    return result
+
+
+def table_style_definition(style: ET.Element, style_id: str | None, name: str | None) -> dict | None:
+    """Preserve table-style inheritance and conditional rules as source evidence."""
+    if style.attrib.get(qn("type")) != "table":
+        return None
+    conditional = []
+    for rule in style.findall("w:tblStylePr", NS):
+        conditional.append({
+            "type": attr_val(rule, "type"),
+            "table": word_property_tree(rule.find("w:tblPr", NS)),
+            "row": word_property_tree(rule.find("w:trPr", NS)),
+            "cell": word_property_tree(rule.find("w:tcPr", NS)),
+            "paragraph_run": direct_format(rule.find("w:pPr", NS), rule.find("w:rPr", NS)),
+        })
+    return {
+        "style_id": style_id,
+        "style_name": name or style_id,
+        "based_on_style_id": attr_val(style.find("w:basedOn", NS)),
+        "table": word_property_tree(style.find("w:tblPr", NS)),
+        "row": word_property_tree(style.find("w:trPr", NS)),
+        "cell": word_property_tree(style.find("w:tcPr", NS)),
+        "paragraph_run": direct_format(style.find("w:pPr", NS), style.find("w:rPr", NS)),
+        "conditional_rules": conditional,
+    }
+
+
+def word_theme_definition(zf: zipfile.ZipFile) -> dict:
+    """Preserve the OOXML theme palette/font scheme without selecting LaTeX fonts."""
+    root = read_docx_xml(zf, "word/theme/theme1.xml")
+    if root is None:
+        return {"present": False, "source": "no readable Word theme part"}
+    color_scheme = root.find(".//a:clrScheme", NS)
+    colors = {}
+    if color_scheme is not None:
+        for entry in list(color_scheme):
+            name = entry.tag.rsplit("}", 1)[-1]
+            value_node = next(iter(entry), None)
+            if value_node is None:
+                continue
+            value_attrs = attrs(value_node)
+            colors[name] = {
+                "kind": value_node.tag.rsplit("}", 1)[-1],
+                "value": value_attrs.get("val") or value_attrs.get("lastClr"),
+                **({"last_color": value_attrs["lastClr"]} if value_attrs.get("lastClr") else {}),
+            }
+    font_scheme = root.find(".//a:fontScheme", NS)
+    fonts = {}
+    if font_scheme is not None:
+        for scheme_name, node_name in (("major", "majorFont"), ("minor", "minorFont")):
+            font_node = font_scheme.find(f"a:{node_name}", NS)
+            if font_node is None:
+                continue
+            scripts = {
+                str(item.attrib.get("script") or ""): str(item.attrib.get("typeface") or "")
+                for item in font_node.findall("a:font", NS)
+                if item.attrib.get("script") and item.attrib.get("typeface")
+            }
+            fonts[scheme_name] = {
+                "latin": (font_node.find("a:latin", NS).attrib.get("typeface") if font_node.find("a:latin", NS) is not None else None),
+                "east_asia": (font_node.find("a:ea", NS).attrib.get("typeface") if font_node.find("a:ea", NS) is not None else None),
+                "complex_script": (font_node.find("a:cs", NS).attrib.get("typeface") if font_node.find("a:cs", NS) is not None else None),
+                "script_fallbacks": scripts,
+            }
+    return {
+        "present": True,
+        "part": "word/theme/theme1.xml",
+        "colors": colors,
+        "fonts": fonts,
+        "source": "official Word theme color and font scheme; raw theme references remain evidence-only until render verification",
+    }
+
+
 def on_off_element_value(element: ET.Element | None) -> bool | None:
     """Read OOXML on/off elements without treating an explicit zero as true."""
     if element is None:
@@ -597,15 +843,63 @@ def on_off_element_value(element: ET.Element | None) -> bool | None:
     return str(attr_val(element) or "1").strip().lower() not in {"0", "false", "off", "no"}
 
 
+def word_text_fill(element: ET.Element | None) -> dict | None:
+    """Retain Word text-fill XML compactly without guessing a LaTeX paint rule."""
+    if element is None:
+        return None
+    children = []
+    for child in list(element)[:12]:
+        grandchildren = [
+            {"node": grandchild.tag.rsplit("}", 1)[-1], "attributes": attrs(grandchild)}
+            for grandchild in list(child)[:8]
+        ]
+        children.append({
+            "node": child.tag.rsplit("}", 1)[-1],
+            "attributes": attrs(child),
+            **({"children": grandchildren} if grandchildren else {}),
+        })
+    return {
+        "attributes": attrs(element),
+        **({"children": children} if children else {}),
+    }
+
+
+def run_property(rpr: ET.Element | None, local: str) -> ET.Element | None:
+    """Find a run property in the main or Word 2010 extension namespace."""
+    if rpr is None:
+        return None
+    classic = rpr.find(f"w:{local}", NS)
+    return classic if classic is not None else rpr.find(f"w14:{local}", NS)
+
+
 def direct_format(ppr: ET.Element | None, rpr: ET.Element | None) -> dict:
     """Capture direct OOXML formatting without guessing inherited values."""
     fonts = attrs(rpr.find("w:rFonts", NS) if rpr is not None else None)
+    color_spec = attrs(rpr.find("w:color", NS) if rpr is not None else None)
     bold_node = rpr.find("w:b", NS) if rpr is not None else None
     italic_node = rpr.find("w:i", NS) if rpr is not None else None
     underline_node = rpr.find("w:u", NS) if rpr is not None else None
     strike_node = rpr.find("w:strike", NS) if rpr is not None else None
     double_strike_node = rpr.find("w:dstrike", NS) if rpr is not None else None
     vertical_align_node = rpr.find("w:vertAlign", NS) if rpr is not None else None
+    small_caps_node = rpr.find("w:smallCaps", NS) if rpr is not None else None
+    caps_node = rpr.find("w:caps", NS) if rpr is not None else None
+    vanish_node = rpr.find("w:vanish", NS) if rpr is not None else None
+    outline_node = rpr.find("w:outline", NS) if rpr is not None else None
+    shadow_node = rpr.find("w:shadow", NS) if rpr is not None else None
+    emboss_node = rpr.find("w:emboss", NS) if rpr is not None else None
+    imprint_node = rpr.find("w:imprint", NS) if rpr is not None else None
+    run_snap_to_grid_node = rpr.find("w:snapToGrid", NS) if rpr is not None else None
+    complex_bold_node = rpr.find("w:bCs", NS) if rpr is not None else None
+    complex_italic_node = rpr.find("w:iCs", NS) if rpr is not None else None
+    right_to_left_node = rpr.find("w:rtl", NS) if rpr is not None else None
+    complex_script_node = rpr.find("w:cs", NS) if rpr is not None else None
+    language = attrs(rpr.find("w:lang", NS) if rpr is not None else None)
+    run_shading = attrs(rpr.find("w:shd", NS) if rpr is not None else None)
+    run_border = attrs(rpr.find("w:bdr", NS) if rpr is not None else None)
+    ligatures = attrs(run_property(rpr, "ligatures"))
+    fit_text = attrs(run_property(rpr, "fitText"))
+    text_fill = word_text_fill(run_property(rpr, "textFill"))
     font = {
         "family": fonts.get("ascii") or fonts.get("hAnsi"),
         "east_asia_family": fonts.get("eastAsia"),
@@ -617,7 +911,15 @@ def direct_format(ppr: ET.Element | None, rpr: ET.Element | None) -> dict:
         ) if rpr is not None else None,
         "bold": None if bold_node is None else attr_val(bold_node) not in {"0", "false", "off"},
         "italic": None if italic_node is None else attr_val(italic_node) not in {"0", "false", "off"},
-        "color": attr_val(rpr.find("w:color", NS)) if rpr is not None else None,
+        "color": color_spec.get("val"),
+        "color_theme": (
+            {key: value for key, value in color_spec.items() if key in {"themeColor", "themeTint", "themeShade"}}
+            or None
+        ),
+        "font_theme": (
+            {key: value for key, value in fonts.items() if key.endswith("Theme")}
+            or None
+        ),
         "underline": (
             None if underline_node is None
             else (attr_val(underline_node) or "single").lower()
@@ -625,9 +927,45 @@ def direct_format(ppr: ET.Element | None, rpr: ET.Element | None) -> dict:
         "strike": None if strike_node is None else on_off_element_value(strike_node),
         "double_strike": None if double_strike_node is None else on_off_element_value(double_strike_node),
         "vertical_align": attr_val(vertical_align_node) if vertical_align_node is not None else None,
+        "small_caps": None if small_caps_node is None else on_off_element_value(small_caps_node),
+        "all_caps": None if caps_node is None else on_off_element_value(caps_node),
+        "highlight": attr_val(rpr.find("w:highlight", NS)) if rpr is not None else None,
+        "hidden": None if vanish_node is None else on_off_element_value(vanish_node),
+        "character_spacing_twips": attr_val(rpr.find("w:spacing", NS)) if rpr is not None else None,
+        "character_scale_percent": attr_val(rpr.find("w:w", NS)) if rpr is not None else None,
+        "character_position_half_points": attr_val(rpr.find("w:position", NS)) if rpr is not None else None,
+        "kerning_half_points": attr_val(rpr.find("w:kern", NS)) if rpr is not None else None,
+        "character_shading": run_shading or None,
+        "character_border": run_border or None,
+        "outline": None if outline_node is None else on_off_element_value(outline_node),
+        "shadow": None if shadow_node is None else on_off_element_value(shadow_node),
+        "emboss": None if emboss_node is None else on_off_element_value(emboss_node),
+        "imprint": None if imprint_node is None else on_off_element_value(imprint_node),
+        "ligatures": ligatures.get("val") or ("enabled" if ligatures else None),
+        "fit_text_width_twips": fit_text.get("val") or None,
+        "text_fill": text_fill,
+    }
+    # ``w:snapToGrid`` is a run property, not the paragraph-level property
+    # with the same name.  It can locally opt a CJK/mixed-script run out of a
+    # section grid, so keep it in a separate scope rather than folding it into
+    # paragraph line spacing or font choice.
+    run = {
+        "snap_to_grid": None if run_snap_to_grid_node is None else on_off_element_value(run_snap_to_grid_node),
+        "language": language or None,
+        "complex_bold": None if complex_bold_node is None else on_off_element_value(complex_bold_node),
+        "complex_italic": None if complex_italic_node is None else on_off_element_value(complex_italic_node),
+        "right_to_left": None if right_to_left_node is None else on_off_element_value(right_to_left_node),
+        "complex_script": None if complex_script_node is None else on_off_element_value(complex_script_node),
     }
     spacing = attrs(ppr.find("w:spacing", NS) if ppr is not None else None)
     indent = attrs(ppr.find("w:ind", NS) if ppr is not None else None)
+    tab_stops = [attrs(node) for node in (ppr.findall("w:tabs/w:tab", NS) if ppr is not None else [])]
+    borders = {
+        node.tag.rsplit("}", 1)[-1]: attrs(node)
+        for node in (ppr.findall("w:pBdr/*", NS) if ppr is not None else [])
+    }
+    shading = attrs(ppr.find("w:shd", NS) if ppr is not None else None)
+    frame = attrs(ppr.find("w:framePr", NS) if ppr is not None else None)
     paragraph = {
         "alignment": attr_val(ppr.find("w:jc", NS)) if ppr is not None else None,
         "space_before_twips": spacing.get("before"),
@@ -639,12 +977,88 @@ def direct_format(ppr: ET.Element | None, rpr: ET.Element | None) -> dict:
         "first_line_twips": indent.get("firstLine"),
         "hanging_twips": indent.get("hanging"),
         "keep_with_next": on_off_element_value(ppr.find("w:keepNext", NS)) if ppr is not None else None,
+        "keep_lines": on_off_element_value(ppr.find("w:keepLines", NS)) if ppr is not None else None,
         "page_break_before": on_off_element_value(ppr.find("w:pageBreakBefore", NS)) if ppr is not None else None,
+        "widow_control": on_off_element_value(ppr.find("w:widowControl", NS)) if ppr is not None else None,
+        "contextual_spacing": on_off_element_value(ppr.find("w:contextualSpacing", NS)) if ppr is not None else None,
+        "suppress_line_numbers": on_off_element_value(ppr.find("w:suppressLineNumbers", NS)) if ppr is not None else None,
+        "snap_to_grid": on_off_element_value(ppr.find("w:snapToGrid", NS)) if ppr is not None else None,
+        "auto_space_de": on_off_element_value(ppr.find("w:autoSpaceDE", NS)) if ppr is not None else None,
+        "auto_space_dn": on_off_element_value(ppr.find("w:autoSpaceDN", NS)) if ppr is not None else None,
+        "kinsoku": on_off_element_value(ppr.find("w:kinsoku", NS)) if ppr is not None else None,
+        "top_line_punctuation": on_off_element_value(ppr.find("w:topLinePunct", NS)) if ppr is not None else None,
+        "overflow_punctuation": on_off_element_value(ppr.find("w:overflowPunct", NS)) if ppr is not None else None,
+        "text_alignment": attr_val(ppr.find("w:textAlignment", NS)) if ppr is not None else None,
+        "right_to_left": on_off_element_value(ppr.find("w:bidi", NS)) if ppr is not None else None,
+        "text_direction": attr_val(ppr.find("w:textDirection", NS)) if ppr is not None else None,
+        "suppress_auto_hyphens": on_off_element_value(ppr.find("w:suppressAutoHyphens", NS)) if ppr is not None else None,
+        "word_wrap": on_off_element_value(ppr.find("w:wordWrap", NS)) if ppr is not None else None,
+        "borders": borders or None,
+        "shading": shading or None,
+        "frame": frame or None,
+        "tab_stops": tab_stops or None,
         "outline_level": attr_val(ppr.find("w:outlineLvl", NS)) if ppr is not None else None,
     }
-    return {
+    result = {
         "font": {key: value for key, value in font.items() if value is not None},
         "paragraph": {key: value for key, value in paragraph.items() if value is not None},
+    }
+    visible_run_properties = {key: value for key, value in run.items() if value is not None}
+    if visible_run_properties:
+        result["run"] = visible_run_properties
+    return result
+
+
+MODELED_RUN_PROPERTY_NODES = {
+    "rFonts", "b", "i", "u", "strike", "dstrike", "vertAlign", "smallCaps", "caps",
+    "vanish", "outline", "shadow", "emboss", "imprint", "color", "sz", "szCs",
+    "highlight", "spacing", "w", "position", "kern", "shd", "bdr", "rStyle", "snapToGrid",
+    "lang", "bCs", "iCs", "rtl", "cs", "ligatures", "fitText", "textFill",
+}
+MODELED_PARAGRAPH_PROPERTY_NODES = {
+    "pStyle", "numPr", "rPr", "jc", "spacing", "ind", "tabs", "pBdr", "shd", "framePr",
+    "keepNext", "keepLines", "pageBreakBefore", "widowControl", "contextualSpacing",
+    "suppressLineNumbers", "snapToGrid", "autoSpaceDE", "autoSpaceDN", "kinsoku",
+    "topLinePunct", "overflowPunct", "textAlignment", "bidi", "textDirection", "suppressAutoHyphens", "wordWrap", "outlineLvl", "sectPr",
+}
+
+
+def unmodeled_format_property_evidence(parts: list[tuple[ET.Element | None, str]]) -> dict:
+    """List OOXML format-property nodes not yet represented by direct_format.
+
+    This is a preservation net, not a claim that every listed node affects the
+    rendered manuscript. The agent must classify each recorded property as a
+    source mapping, documented default, guidance/non-format metadata, or gap.
+    """
+    records: dict[tuple[str, str], dict] = {}
+    for root, part_name in parts:
+        if root is None:
+            continue
+        for parent_tag, scope, modeled in (
+            ("rPr", "run", MODELED_RUN_PROPERTY_NODES),
+            ("pPr", "paragraph", MODELED_PARAGRAPH_PROPERTY_NODES),
+        ):
+            for parent in root.findall(f".//w:{parent_tag}", NS):
+                for child in parent:
+                    name = child.tag.rsplit("}", 1)[-1]
+                    if name in modeled:
+                        continue
+                    key = (scope, name)
+                    record = records.setdefault(key, {
+                        "scope": scope,
+                        "node": name,
+                        "count": 0,
+                        "samples": [],
+                        "source": "OOXML format-property node not yet modeled by Temp2TeX direct-format extraction",
+                    })
+                    record["count"] += 1
+                    if len(record["samples"]) < 6:
+                        record["samples"].append({"part": part_name, "attributes": attrs(child)})
+    properties = sorted(records.values(), key=lambda item: (-int(item["count"]), item["scope"], item["node"]))
+    return {
+        "present": bool(properties),
+        "properties": properties[:120],
+        "source": "all readable Word document/style/header/footer format-property nodes",
     }
 
 
@@ -731,6 +1145,7 @@ def paragraph_format_spans(
     paragraph: ET.Element,
     paragraph_effective: dict,
     hyperlink_targets: dict[str, str] | None = None,
+    run_style_resolver=None,
 ) -> dict:
     """Preserve ordered Word run formatting instead of collapsing mixed runs.
 
@@ -748,11 +1163,18 @@ def paragraph_format_spans(
             continue
         rpr = run.find("w:rPr", NS)
         direct = direct_format(None, rpr) if rpr is not None else {}
-        effective = merge_format(paragraph_effective, direct)
+        character_style_id = attr_val(rpr.find("w:rStyle", NS)) if rpr is not None else None
+        character_style = (
+            run_style_resolver(character_style_id)
+            if character_style_id and run_style_resolver is not None
+            else {}
+        )
+        effective = merge_format(paragraph_effective, character_style, direct)
         signature = json.dumps(
             {
                 "direct_format": direct,
                 "effective_format": effective,
+                "character_style_id": character_style_id,
                 "hyperlink_target": hyperlink_target,
             },
             sort_keys=True,
@@ -768,6 +1190,7 @@ def paragraph_format_spans(
                 "text": text,
                 "direct_format": direct,
                 "effective_format": effective,
+                **({"character_style_id": character_style_id} if character_style_id else {}),
                 **({"hyperlink_target": hyperlink_target} if hyperlink_target else {}),
                 "signature": signature,
             })
@@ -879,27 +1302,84 @@ def paragraph_break_types(paragraph: ET.Element) -> list[str]:
     return values
 
 
+def layout_only_paragraph_evidence(paragraph: ET.Element, ppr: ET.Element | None) -> bool:
+    """Return whether an otherwise blank paragraph has observable layout work."""
+    if ppr is not None and any(
+        ppr.find(f"w:{name}", NS) is not None
+        for name in (
+            "spacing", "ind", "jc", "tabs", "pBdr", "shd", "framePr",
+            "keepNext", "keepLines", "pageBreakBefore", "widowControl", "sectPr",
+        )
+    ):
+        return True
+    if paragraph.findall(".//w:br", NS) or paragraph.findall(".//w:tab", NS):
+        return True
+    return bool(
+        paragraph.findall(".//w:drawing", NS)
+        or paragraph.findall(".//w:pict", NS)
+        or paragraph.findall(".//wp:inline", NS)
+        or paragraph.findall(".//wp:anchor", NS)
+    )
+
+
 def merge_format(*formats: dict | None) -> dict:
     """Merge Word defaults, basedOn styles, and direct overrides by role."""
-    result: dict[str, dict] = {"font": {}, "paragraph": {}}
+    result: dict[str, dict] = {"font": {}, "paragraph": {}, "run": {}}
     for item in formats:
         if not isinstance(item, dict):
             continue
-        for role in ("font", "paragraph"):
+        for role in ("font", "paragraph", "run"):
             value = item.get(role)
             if isinstance(value, dict):
                 result[role].update({key: val for key, val in value.items() if val is not None})
     return {role: value for role, value in result.items() if value}
 
 
-def inspect_header_footer_part(zf: zipfile.ZipFile, name: str) -> dict:
+def inspect_header_footer_part(
+    zf: zipfile.ZipFile,
+    name: str,
+    *,
+    full_paragraph_evidence: bool = False,
+    style_resolver=None,
+    style_names: dict[str, str] | None = None,
+    document_defaults: dict | None = None,
+) -> dict:
     root = read_docx_xml(zf, name)
     kind = "header" if Path(name).name.lower().startswith("header") else "footer"
+    style_names = style_names or {}
+    document_defaults = document_defaults or {}
     paragraphs = []
     drawings = []
     rules = []
-    text_boxes = text_box_samples(root, name)
     part_relationships = relationship_targets(zf, name)
+
+    def header_textbox_evidence(paragraph: ET.Element) -> dict:
+        ppr = paragraph.find("w:pPr", NS)
+        style_id = attr_val(ppr.find("w:pStyle", NS)) if ppr is not None else None
+        style_effective = style_resolver(style_id) if style_id and style_resolver is not None else {}
+        span_base = merge_format(document_defaults, style_effective, direct_format(ppr, None))
+        span_ledger = paragraph_format_spans(
+            paragraph,
+            span_base,
+            part_relationships,
+            style_resolver,
+        )
+        return {
+            "text": text_of(paragraph)[:220],
+            "style_id": style_id,
+            "style_name": style_names.get(style_id, style_id),
+            "direct_format": direct_format(ppr, None),
+            "effective_format": span_base,
+            "format_spans": span_ledger["spans"],
+            "format_span_text": span_ledger["text"],
+        }
+
+    text_boxes = text_box_samples(
+        root,
+        name,
+        header_textbox_evidence,
+        full_paragraph_evidence=full_paragraph_evidence,
+    )
     if root is not None:
         for paragraph in root.findall(".//w:p", NS):
             text = text_of(paragraph)
@@ -936,24 +1416,32 @@ def inspect_header_footer_part(zf: zipfile.ZipFile, name: str) -> dict:
                 elif "PAGE" in code:
                     tokens.append({"kind": "page_field"})
             ppr = paragraph.find("w:pPr", NS)
+            style_id = attr_val(ppr.find("w:pStyle", NS)) if ppr is not None else None
+            style_effective = style_resolver(style_id) if style_id and style_resolver is not None else {}
             rpr = ppr.find("w:rPr", NS) if ppr is not None else None
             if rpr is None:
                 rpr = paragraph.find("./w:r/w:rPr", NS)
-            if text or tokens:
+            layout_only = not bool(text.strip()) and not tokens and layout_only_paragraph_evidence(paragraph, ppr)
+            if text or tokens or layout_only:
                 paragraph_direct = direct_format(ppr, rpr)
                 # The representative paragraph record may retain the first run
                 # for older furniture mapping. Span inheritance must exclude
                 # that run so its bold/italic state is not imposed on siblings.
                 span_ledger = paragraph_format_spans(
                     paragraph,
-                    direct_format(ppr, None),
+                    merge_format(document_defaults, style_effective, direct_format(ppr, None)),
                     part_relationships,
+                    style_resolver,
                 )
                 paragraphs.append({
                     "text": text[:220],
+                    "style_id": style_id,
+                    "style_name": style_names.get(style_id, style_id),
                     "alignment": attr_val(paragraph.find("./w:pPr/w:jc", NS)) or "left",
                     "tokens": tokens,
+                    "layout_only": layout_only,
                     "direct_format": paragraph_direct,
+                    "effective_format": merge_format(document_defaults, style_effective, direct_format(ppr, None)),
                     "format_spans": span_ledger["spans"],
                     "format_span_text": span_ledger["text"],
                 })
@@ -963,6 +1451,30 @@ def inspect_header_footer_part(zf: zipfile.ZipFile, name: str) -> dict:
                 rules.append({"edge": "bottom", "value": attr_val(bottom), "size_eighth_points": attr_val(bottom, "sz"), "color": attr_val(bottom, "color")})
             for node in paragraph.findall(".//wp:inline", NS) + paragraph.findall(".//wp:anchor", NS):
                 extent = node.find("wp:extent", NS)
+                geometry = drawing_geometry(node)
+                preset_geometry = node.find(".//a:prstGeom", NS)
+                if preset_geometry is not None and preset_geometry.attrib.get("prst") == "line":
+                    position_h = node.find("wp:positionH", NS)
+                    position_v = node.find("wp:positionV", NS)
+                    line = node.find(".//a:ln", NS)
+                    colour_node = None
+                    if line is not None:
+                        colour_node = line.find(".//a:srgbClr", NS)
+                        if colour_node is None:
+                            colour_node = line.find(".//a:schemeClr", NS)
+                    rules.append({
+                        "edge": "drawing_line",
+                        "source": "drawingml",
+                        "width_emu": extent.attrib.get("cx") if extent is not None else None,
+                        "height_emu": extent.attrib.get("cy") if extent is not None else None,
+                        "horizontal_relative_to": position_h.attrib.get("relativeFrom") if position_h is not None else "paragraph",
+                        "horizontal_offset_emu": position_h.findtext("wp:posOffset", namespaces=NS) if position_h is not None else None,
+                        "vertical_relative_to": position_v.attrib.get("relativeFrom") if position_v is not None else "paragraph",
+                        "vertical_offset_emu": position_v.findtext("wp:posOffset", namespaces=NS) if position_v is not None else None,
+                        "stroke_width_emu": line.attrib.get("w") if line is not None else None,
+                        "color": colour_node.attrib.get("val") if colour_node is not None else None,
+                        "geometry": geometry,
+                    })
                 blip = node.find(".//a:blip", NS)
                 rel_id = blip.attrib.get(f"{{{R_NS}}}embed") if blip is not None else None
                 if not rel_id:
@@ -981,16 +1493,54 @@ def inspect_header_footer_part(zf: zipfile.ZipFile, name: str) -> dict:
                     "vertical_relative_to": position_v.attrib.get("relativeFrom") if position_v is not None else "paragraph",
                     "vertical_alignment": position_v.findtext("wp:align", namespaces=NS) if position_v is not None else None,
                     "vertical_offset_emu": position_v.findtext("wp:posOffset", namespaces=NS) if position_v is not None else None,
-                    "geometry": drawing_geometry(node),
+                    "geometry": geometry,
                 })
+        vml_shapes = vml_shape_samples(root, name, part_relationships)
+        for group in vml_shapes:
+            for shape in group.get("shapes") or []:
+                if isinstance(shape, dict) and shape.get("kind") == "line":
+                    vml_rule = {
+                        "edge": "drawing_line",
+                        "source": "vml",
+                        "from": shape.get("from"),
+                        "to": shape.get("to"),
+                        "strokeweight": shape.get("strokeweight"),
+                        "color": shape.get("strokecolor"),
+                        "style": shape.get("style") or {},
+                    }
+                    try:
+                        vml_width = float(str(shape.get("to") or "").split(",", 1)[0].replace("pt", "").strip())
+                    except ValueError:
+                        vml_width = None
+                    matching_drawing = next((
+                        candidate for candidate in rules
+                        if candidate.get("edge") == "drawing_line"
+                        and candidate.get("source") == "drawingml"
+                        and vml_width is not None
+                        and abs(float(candidate.get("width_emu") or 0) / 12700 - vml_width) <= 2
+                    ), None)
+                    if matching_drawing is not None:
+                        # AlternateContent stores one physical line twice:
+                        # DrawingML for current Word and VML for compatibility.
+                        # Retain the VML width/colour fallback without creating
+                        # a duplicate mapping obligation.
+                        matching_drawing["fallback_vml"] = vml_rule
+                        if not matching_drawing.get("stroke_width_emu"):
+                            matching_drawing["strokeweight"] = vml_rule.get("strokeweight")
+                        if not matching_drawing.get("color"):
+                            matching_drawing["color"] = vml_rule.get("color")
+                    else:
+                        rules.append(vml_rule)
+    else:
+        vml_shapes = []
     return {
         "part": name,
         "kind": kind,
         "text_samples": [item["text"] for item in paragraphs[:20]],
-        "paragraphs": paragraphs[:20],
+        "paragraphs": paragraphs if full_paragraph_evidence else paragraphs[:20],
         "embedded_relationship_ids": [item["relationship_id"] for item in drawings],
         "drawings": drawings,
-        "vml_shapes": vml_shape_samples(root, name, part_relationships),
+        "vml_shapes": vml_shapes,
         "text_boxes": text_boxes,
         "rules": rules,
     }
@@ -1060,9 +1610,8 @@ def real_note_nodes(root: ET.Element | None, kind: str) -> list[ET.Element]:
     return nodes
 
 
-def note_numbering_evidence(settings: ET.Element | None, kind: str) -> dict:
-    """Read explicit Word note numbering settings without guessing marker style."""
-    properties = settings.find(f"w:{kind}Pr", NS) if settings is not None else None
+def note_numbering_properties(properties: ET.Element | None, kind: str, source: str) -> dict:
+    """Read Word note numbering properties without guessing marker style."""
     number_format = attr_val(properties.find("w:numFmt", NS)) if properties is not None else None
     latex_marker_styles = {
         "decimal": "arabic",
@@ -1080,11 +1629,17 @@ def note_numbering_evidence(settings: ET.Element | None, kind: str) -> dict:
         "position": attr_val(properties.find("w:pos", NS)) if properties is not None else None,
         "explicit_number_format": number_format is not None,
         "source": (
-            f"official Word settings.xml {kind}Pr numFmt"
+            f"{source} {kind}Pr numFmt"
             if number_format is not None
-            else f"Word default {kind} numbering; no explicit numFmt"
+            else f"{source} {kind} numbering; no explicit numFmt"
         ),
     }
+
+
+def note_numbering_evidence(settings: ET.Element | None, kind: str) -> dict:
+    """Read document-level Word note settings without guessing marker style."""
+    properties = settings.find(f"w:{kind}Pr", NS) if settings is not None else None
+    return note_numbering_properties(properties, kind, "official Word settings.xml")
 
 
 def note_reference_samples(
@@ -1144,6 +1699,7 @@ def inspect_docx(
         document = read_docx_xml(zf, "word/document.xml")
         styles_xml = read_docx_xml(zf, "word/styles.xml")
         names = set(zf.namelist())
+        theme_definition = word_theme_definition(zf)
         list_definitions = numbering_definitions(zf)
 
         styles = []
@@ -1169,6 +1725,7 @@ def inspect_docx(
                     "type": stype,
                     "based_on_style_id": attr_val(style.find("w:basedOn", NS)),
                     "direct_format": direct_format(style.find("w:pPr", NS), style.find("w:rPr", NS)),
+                    "table_style_evidence": table_style_definition(style, sid, name),
                     "list_num_pr": {
                         "num_id": style_num_id,
                         "level": style_level or "0",
@@ -1236,6 +1793,8 @@ def inspect_docx(
         front_matter = []
         body_drawings = []
         list_items = []
+        tab_stop_evidence = []
+        drop_cap_evidence = []
         def textbox_paragraph_evidence(paragraph: ET.Element) -> dict:
             sid = attr_val(paragraph.find("./w:pPr/w:pStyle", NS))
             if sid is None and "Normal" in style_names:
@@ -1262,6 +1821,7 @@ def inspect_docx(
                 paragraph,
                 span_base,
                 document_relationships,
+                resolved_style,
             )
             full_text = text_of(paragraph)
             return {
@@ -1274,7 +1834,12 @@ def inspect_docx(
                 "format_span_text": span_ledger["text"],
             }
 
-        text_boxes = text_box_samples(document, "word/document.xml", textbox_paragraph_evidence)
+        text_boxes = text_box_samples(
+            document,
+            "word/document.xml",
+            textbox_paragraph_evidence,
+            full_paragraph_evidence=full_paragraph_evidence,
+        )
         equations = equation_samples(document, "word/document.xml")
         document_paragraph_nodes = document.findall(".//w:p", NS) if document is not None else []
         paragraph_indices = {id(paragraph): idx for idx, paragraph in enumerate(document_paragraph_nodes, 1)}
@@ -1321,6 +1886,7 @@ def inspect_docx(
                     para,
                     paragraph_effective,
                     document_relationships,
+                    resolved_style,
                 )
                 for node in para.findall(".//wp:inline", NS) + para.findall(".//wp:anchor", NS):
                     extent = node.find("wp:extent", NS)
@@ -1345,7 +1911,8 @@ def inspect_docx(
                         "paragraph_direct_format": paragraph_direct,
                         "paragraph_effective_format": paragraph_effective,
                     })
-                if not txt:
+                layout_only = not bool(txt.strip()) and layout_only_paragraph_evidence(para, ppr)
+                if not txt.strip() and not layout_only:
                     continue
                 # Word omits w:pStyle for paragraphs that inherit the Normal
                 # style. Preserve that semantic role instead of treating body
@@ -1386,7 +1953,34 @@ def inspect_docx(
                     "effective_format": paragraph_effective,
                     "list_evidence": list_evidence,
                     "in_table_cell": in_table_cell,
+                    "layout_only": layout_only,
                 }
+                effective_tabs = ((paragraph_effective.get("paragraph") or {}).get("tab_stops") or [])
+                direct_tabs = ((paragraph_direct.get("paragraph") or {}).get("tab_stops") or [])
+                is_toc_style = str(sid or "").lower().startswith("toc") or str(sname or "").lower().startswith("toc")
+                if para.findall(".//w:tab", NS) and effective_tabs and not is_toc_style:
+                    tab_stop_evidence.append({
+                        "paragraph_index": idx,
+                        "style_id": sid,
+                        "style_name": sname,
+                        "text": txt if full_paragraph_evidence else txt[:220],
+                        "in_table_cell": in_table_cell,
+                        "tab_stops": effective_tabs,
+                        "direct_tab_stops": direct_tabs or None,
+                        "source": "visible Word tab character with effective paragraph tab-stop definition",
+                    })
+                frame = ((paragraph_effective.get("paragraph") or {}).get("frame") or {})
+                if frame.get("dropCap") in {"drop", "margin"}:
+                    drop_cap_evidence.append({
+                        "paragraph_index": idx,
+                        "style_id": sid,
+                        "style_name": sname,
+                        "drop_cap_text": txt if full_paragraph_evidence else txt[:80],
+                        "drop_cap": frame.get("dropCap"),
+                        "lines": frame.get("lines"),
+                        "frame": frame,
+                        "source": "Word framePr dropCap on a visible paragraph",
+                    })
                 if span_ledger["spans"]:
                     item["format_spans"] = span_ledger["spans"]
                     item["format_span_text"] = span_ledger["text"]
@@ -1405,6 +1999,9 @@ def inspect_docx(
                     list_items.append({
                         "paragraph_index": idx,
                         "text": txt if full_paragraph_evidence else txt[:220],
+                        "style_id": sid,
+                        "style_name": sname,
+                        "in_table_cell": in_table_cell,
                         **list_evidence,
                     })
                 style_key = f"{sid or ''} {sname or ''}".lower()
@@ -1441,8 +2038,15 @@ def inspect_docx(
                 rows = table.findall(".//w:tr", NS)
                 row_cells = [len(row.findall("./w:tc", NS)) for row in rows]
                 cells = [text_of(cell)[:140] for cell in table.findall(".//w:tc", NS) if text_of(cell)]
+                table_pr = table.find("./w:tblPr", NS)
                 table_style_id = attr_val(table.find("./w:tblPr/w:tblStyle", NS))
                 borders = table.findall("./w:tblPr/w:tblBorders/*", NS)
+                table_indent = attrs(table_pr.find("w:tblInd", NS) if table_pr is not None else None)
+                default_cell_margins = table_box_sides(table_pr.find("w:tblCellMar", NS) if table_pr is not None else None)
+                table_positioning = attrs(table_pr.find("w:tblpPr", NS) if table_pr is not None else None)
+                table_overlap = attr_val(table_pr.find("w:tblOverlap", NS) if table_pr is not None else None)
+                table_shading = attrs(table_pr.find("w:shd", NS) if table_pr is not None else None)
+                table_style_evidence = (styles_by_id.get(str(table_style_id)) or {}).get("table_style_evidence") if table_style_id else None
                 active_borders = {
                     node.tag.rsplit("}", 1)[-1]
                     for node in borders
@@ -1460,6 +2064,7 @@ def inspect_docx(
                 header_cells_fully_bold = []
                 header_cell_samples = []
                 cell_format_samples = []
+                row_format_samples = []
                 header_fonts = []
                 for cell in header_cells:
                     cell_pr = cell.find("w:tcPr", NS)
@@ -1498,6 +2103,7 @@ def inspect_docx(
                             paragraph,
                             span_base,
                             document_relationships,
+                            resolved_style,
                         )
                         header_cell_samples.append({
                             "text": text_of(cell)[:220],
@@ -1527,11 +2133,25 @@ def inspect_docx(
                         if bold is not None and attr_val(bold) not in {"0", "false", "off"}:
                             header_bold.append(True)
                 for row_index, row in enumerate(rows, 1):
+                    row_pr = row.find("w:trPr", NS)
+                    row_height_node = row_pr.find("w:trHeight", NS) if row_pr is not None else None
+                    row_format_samples.append({
+                        "row_index": row_index,
+                        "height_twips": attr_val(row_height_node, "val"),
+                        "height_rule": attr_val(row_height_node, "hRule"),
+                        "cant_split": row_pr is not None and row_pr.find("w:cantSplit", NS) is not None,
+                        "repeat_header": row_pr is not None and row_pr.find("w:tblHeader", NS) is not None,
+                        "grid_after": attr_val(row_pr.find("w:gridAfter", NS) if row_pr is not None else None),
+                        "width_after": attrs(row_pr.find("w:wAfter", NS) if row_pr is not None else None),
+                    })
                     for column_index, cell in enumerate(row.findall("./w:tc", NS), 1):
                         cell_pr = cell.find("w:tcPr", NS)
                         shading = cell_pr.find("w:shd", NS) if cell_pr is not None else None
                         merge = cell_pr.find("w:vMerge", NS) if cell_pr is not None else None
                         grid_span = cell_pr.find("w:gridSpan", NS) if cell_pr is not None else None
+                        cell_width = attrs(cell_pr.find("w:tcW", NS) if cell_pr is not None else None)
+                        cell_margins = table_box_sides(cell_pr.find("w:tcMar", NS) if cell_pr is not None else None)
+                        cell_borders = table_border_sides(cell_pr.find("w:tcBorders", NS) if cell_pr is not None else None)
                         cell_paragraphs = []
                         for paragraph_index, paragraph in enumerate(cell.findall("./w:p", NS), 1):
                             style_id = attr_val(paragraph.find("./w:pPr/w:pStyle", NS))
@@ -1557,6 +2177,7 @@ def inspect_docx(
                                 paragraph,
                                 paragraph_effective,
                                 document_relationships,
+                                resolved_style,
                             )
                             cell_paragraphs.append({
                                 "paragraph_index": paragraph_index,
@@ -1574,6 +2195,11 @@ def inspect_docx(
                             "text": text_of(cell)[:320],
                             "fill": attr_val(shading, "fill") if shading is not None else None,
                             "vertical_alignment": attr_val(cell_pr.find("w:vAlign", NS)) if cell_pr is not None else None,
+                            "width": cell_width,
+                            "margins": cell_margins,
+                            "borders": cell_borders,
+                            "no_wrap": cell_pr is not None and cell_pr.find("w:noWrap", NS) is not None,
+                            "hide_end_of_cell_marker": cell_pr is not None and cell_pr.find("w:hideMark", NS) is not None,
                             "grid_span": attr_val(grid_span, "val") if grid_span is not None else None,
                             "vertical_merge": (
                                 attr_val(merge, "val") if merge is not None and attr_val(merge, "val") is not None
@@ -1608,10 +2234,16 @@ def inspect_docx(
                     "max_columns": max(row_cells) if row_cells else 0,
                     "sample_cells": cells[:8],
                     "style_id": table_style_id,
+                    "style_evidence": table_style_evidence,
                     "width_twips": attr_val(table.find("./w:tblPr/w:tblW", NS), "w"),
                     "width_type": attr_val(table.find("./w:tblPr/w:tblW", NS), "type"),
                     "alignment": attr_val(table.find("./w:tblPr/w:jc", NS)),
                     "layout": attr_val(table.find("./w:tblPr/w:tblLayout", NS), "type"),
+                    "indent": table_indent,
+                    "default_cell_margins": default_cell_margins,
+                    "positioning": table_positioning,
+                    "overlap": table_overlap,
+                    "shading": table_shading,
                     "grid_column_widths_twips": [attr_val(column, "w") for column in table.findall("./w:tblGrid/w:gridCol", NS)],
                     "has_merged_cells": bool(table.findall(".//w:gridSpan", NS) or table.findall(".//w:vMerge", NS)),
                     "border_profile": "grid" if is_grid else "horizontal" if {"top", "bottom", "insideH"}.issubset(active_borders) else "none" if borders else "unknown",
@@ -1627,6 +2259,8 @@ def inspect_docx(
                     "header_cell_samples": header_cell_samples[:12],
                     "cell_format_samples": cell_format_samples[:96],
                     "cell_format_samples_truncated": len(cell_format_samples) > 96,
+                    "row_format_samples": row_format_samples[:96],
+                    "row_format_samples_truncated": len(row_format_samples) > 96,
                     "header_row_height_twips": attr_val(row_height, "val"),
                     "header_row_height_rule": attr_val(row_height, "hRule"),
                 })
@@ -1646,16 +2280,21 @@ def inspect_docx(
                     "style_name": paragraph.get("style_name"),
                     "in_table_cell": bool(paragraph.get("in_table_cell")),
                     "classification_source": classification_source,
+                    "label": caption_label(paragraph.get("text"), kind),
                 })
         for table in tables:
             start = table.get("first_paragraph_index")
             end = table.get("last_paragraph_index")
             if isinstance(start, int) and isinstance(end, int):
-                table["caption_relation"] = nearest_caption_relation(caption_candidates, "table", start, end)
-        for drawing in body_drawings:
+                table["caption_relation"] = nearest_caption_relation(
+                    caption_candidates, "table", start, end, int(table.get("index") or 0) or None
+                )
+        for drawing_ordinal, drawing in enumerate(body_drawings, start=1):
             index = drawing.get("paragraph_index")
             if isinstance(index, int):
-                drawing["caption_relation"] = nearest_caption_relation(caption_candidates, "figure", index, index)
+                drawing["caption_relation"] = nearest_caption_relation(
+                    caption_candidates, "figure", index, index, drawing_ordinal
+                )
 
         flow_paragraphs = [
             item for item in paragraphs
@@ -1759,7 +2398,7 @@ def inspect_docx(
             if isinstance(index, int):
                 attach_outer_flow_context(drawing, index, index, drawing.get("paragraph_effective_format"))
 
-        toc_evidence = {"has_toc_field": False, "field_samples": [], "heading_samples": []}
+        toc_evidence = {"has_toc_field": False, "field_samples": [], "heading_samples": [], "entry_tab_stops": []}
         if document is not None:
             field_text = [node.text or "" for node in document.findall(".//w:instrText", NS)]
             field_text.extend(attr_val(node, "instr") or "" for node in document.findall(".//w:fldSimple", NS))
@@ -1771,6 +2410,25 @@ def inspect_docx(
                 normalized = text.strip().lower()
                 if normalized in {"contents", "table of contents", "目录"}:
                     toc_evidence["heading_samples"].append(text[:120])
+                ppr = paragraph.find("w:pPr", NS)
+                style_id = attr_val(ppr.find("w:pStyle", NS)) if ppr is not None else None
+                style_name = str(style_names.get(style_id, style_id or "") or "").lower()
+                field_codes = [str(node.text or "") for node in paragraph.findall(".//w:instrText", NS)]
+                is_toc_entry = (
+                    str(style_id or "").lower().startswith("toc")
+                    or style_name.startswith("toc")
+                    or "table of contents" in style_name
+                    or any("TOC" in code.upper() for code in field_codes)
+                )
+                tabs = [attrs(node) for node in (ppr.findall("w:tabs/w:tab", NS) if ppr is not None else [])]
+                if is_toc_entry and tabs:
+                    toc_evidence["entry_tab_stops"].append({
+                        "paragraph_index": paragraph_indices.get(id(paragraph)),
+                        "style_id": style_id,
+                        "style_name": style_names.get(style_id, style_id),
+                        "text": text[:220],
+                        "tab_stops": tabs,
+                    })
 
         sections = []
         settings = read_docx_xml(zf, "word/settings.xml")
@@ -1785,6 +2443,8 @@ def inspect_docx(
                 margins = sect.find("w:pgMar", NS)
                 cols = sect.find("w:cols", NS)
                 line_numbers = sect.find("w:lnNumType", NS)
+                page_numbers = sect.find("w:pgNumType", NS)
+                doc_grid = sect.find("w:docGrid", NS)
                 header_references = []
                 footer_references = []
                 for reference in sect.findall("w:headerReference", NS):
@@ -1830,6 +2490,14 @@ def inspect_docx(
                         if attr_val(column, "w") is not None
                     ] if cols is not None else [],
                     "different_first_page": sect.find("w:titlePg", NS) is not None,
+                    "footnote_numbering": note_numbering_properties(sect.find("w:footnotePr", NS), "footnote", f"official Word section {idx}") if sect.find("w:footnotePr", NS) is not None else {},
+                    "endnote_numbering": note_numbering_properties(sect.find("w:endnotePr", NS), "endnote", f"official Word section {idx}") if sect.find("w:endnotePr", NS) is not None else {},
+                    "page_numbering": {
+                        "format": attr_val(page_numbers, "fmt") if page_numbers is not None else None,
+                        "start": attr_val(page_numbers, "start") if page_numbers is not None else None,
+                        "chapter_style": attr_val(page_numbers, "chapStyle") if page_numbers is not None else None,
+                        "chapter_separator": attr_val(page_numbers, "chapSep") if page_numbers is not None else None,
+                    } if page_numbers is not None else {},
                     "line_numbering": {
                         "enabled": line_numbers is not None,
                         "count_by": attr_val(line_numbers, "countBy") if line_numbers is not None else None,
@@ -1837,6 +2505,7 @@ def inspect_docx(
                         "distance_twips": attr_val(line_numbers, "distance") if line_numbers is not None else None,
                         "restart": attr_val(line_numbers, "restart") if line_numbers is not None else None,
                     },
+                    "text_grid": attrs(doc_grid),
                     "header_references": header_references,
                     "footer_references": footer_references,
                 })
@@ -1859,7 +2528,14 @@ def inspect_docx(
 
         media = [{"path": name, "bytes": zf.getinfo(name).file_size} for name in sorted(names) if name.startswith("word/media/")]
         header_footer_parts = [
-            inspect_header_footer_part(zf, name)
+            inspect_header_footer_part(
+                zf,
+                name,
+                full_paragraph_evidence=full_paragraph_evidence,
+                style_resolver=resolved_style,
+                style_names=style_names,
+                document_defaults=document_defaults,
+            )
             for name in sorted(names)
             if re.fullmatch(r"word/(?:header|footer)\d+\.xml", name)
         ]
@@ -1888,6 +2564,7 @@ def inspect_docx(
                         paragraph,
                         effective,
                         document_relationships,
+                        resolved_style,
                     )
                     samples.append({
                         "note_id": note_id,
@@ -1915,6 +2592,12 @@ def inspect_docx(
         content_controls.extend(content_control_samples(footnotes, "word/footnotes.xml"))
         content_controls.extend(content_control_samples(endnotes, "word/endnotes.xml"))
         comments_evidence = comment_samples(comments, document)
+        format_property_parts = [(document, "word/document.xml"), (styles_xml, "word/styles.xml")]
+        format_property_parts.extend(
+            (read_docx_xml(zf, name), name)
+            for name in sorted(item for item in names if re.fullmatch(r"word/(?:header|footer)\d+\.xml", item))
+        )
+        unmodeled_format_properties = unmodeled_format_property_evidence(format_property_parts)
 
     joined = " ".join(p["text"] for p in paragraphs[:80])
     joined += " " + " ".join(item["text"] for item in text_boxes[:20])
@@ -1930,6 +2613,932 @@ def inspect_docx(
         "moves_from_ignored": len(document.findall(".//w:moveFrom", NS)) if document is not None else 0,
         "source": "official Word tracked-revision XML; deleted and moved-from text excluded from visible evidence",
     }
+    character_effect_keys = (
+        "small_caps", "all_caps", "highlight", "hidden", "character_spacing_twips",
+        "character_scale_percent", "character_position_half_points", "kerning_half_points",
+        "character_shading", "character_border", "outline", "shadow", "emboss", "imprint",
+        "ligatures", "fit_text_width_twips", "text_fill",
+    )
+
+    def visible_character_effect(key: str, value: object) -> bool:
+        """Avoid treating Word's empty/default character effects as visible evidence."""
+        if key == "kerning_half_points":
+            try:
+                return float(str(value)) > 0
+            except (TypeError, ValueError):
+                return False
+        if key == "character_shading":
+            if not isinstance(value, dict):
+                return False
+            fill = str(value.get("fill") or "").strip().lower()
+            pattern = str(value.get("val") or "").strip().lower()
+            return fill not in {"", "auto", "none", "ffffff"} or pattern not in {"", "clear", "nil", "none"}
+        if key == "character_border":
+            if not isinstance(value, dict):
+                return False
+            border_type = str(value.get("val") or "").strip().lower()
+            if border_type in {"", "none", "nil"}:
+                return False
+            size = str(value.get("sz") or "").strip()
+            try:
+                return not size or float(size) > 0
+            except ValueError:
+                return True
+        if key == "ligatures":
+            return str(value or "").strip().lower() not in {"", "none", "0", "false", "off"}
+        if key == "fit_text_width_twips":
+            try:
+                return float(str(value)) > 0
+            except (TypeError, ValueError):
+                return bool(value)
+        if key == "text_fill":
+            return isinstance(value, dict) and bool(value.get("attributes") or value.get("children"))
+        return value not in {None, False, "", "0", "100", "none", "auto"}
+
+    character_effect_evidence = []
+    def collect_character_effect_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for paragraph in records:
+            if not isinstance(paragraph, dict):
+                continue
+            for span in paragraph.get("format_spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                font = ((span.get("effective_format") or {}).get("font") or {})
+                effects = {
+                    key: font.get(key)
+                    for key in character_effect_keys
+                    if visible_character_effect(key, font.get(key))
+                }
+                if effects:
+                    character_effect_evidence.append({
+                        "evidence_kind": "visible_run_span",
+                        "scope": scope,
+                        "part": part,
+                        "table_index": table_index,
+                        "row_index": cell[0] if cell else None,
+                        "column_index": cell[1] if cell else None,
+                        "paragraph_index": paragraph.get("index") or paragraph.get("paragraph_index"),
+                        "style_id": paragraph.get("style_id"),
+                        "style_name": paragraph.get("style_name"),
+                        "in_table_cell": bool(paragraph.get("in_table_cell")) or cell is not None,
+                        "text": str(span.get("text") or "")[:220],
+                        "start": span.get("start"),
+                        "end": span.get("end"),
+                        "effects": effects,
+                        "source": "visible Word run with effective character-effect formatting",
+                    })
+
+    collect_character_effect_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_character_effect_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_character_effect_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_character_effect_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_character_effect_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_character_effect_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_character_effect_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_character_effect_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    # Sparse author templates often define journal styles without including a
+    # representative paragraph. Keep those rules, but label them separately
+    # so they cannot be mistaken for rendered visible-span confirmation.
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        style_type = str(style.get("type") or "")
+        if style_type not in {"paragraph", "character", "table"}:
+            continue
+        effective = style.get("effective_format") if isinstance(style.get("effective_format"), dict) else {}
+        font = effective.get("font") if isinstance(effective.get("font"), dict) else {}
+        effects = {
+            key: font.get(key)
+            for key in character_effect_keys
+            if visible_character_effect(key, font.get(key))
+        }
+        if effects:
+            character_effect_evidence.append({
+                "evidence_kind": "named_style_rule",
+                "style_id": style.get("style_id"),
+                "style_name": style.get("name"),
+                "style_type": style_type,
+                "effects": effects,
+                "source": "effective Word named style character formatting; no visible-run confirmation implied",
+            })
+
+    character_style_evidence = []
+
+    def collect_character_style_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for span in record.get("format_spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                character_style_id = span.get("character_style_id")
+                if not character_style_id:
+                    continue
+                character_style_id = str(character_style_id)
+                character_style_evidence.append({
+                    "scope": scope,
+                    "part": part,
+                    "table_index": table_index,
+                    "row_index": cell[0] if cell else None,
+                    "column_index": cell[1] if cell else None,
+                    "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                    "paragraph_style_id": record.get("style_id"),
+                    "paragraph_style_name": record.get("style_name"),
+                    "character_style_id": character_style_id,
+                    "character_style_name": style_names.get(character_style_id, character_style_id),
+                    "character_style_resolved": character_style_id in styles_by_id,
+                    "text": str(span.get("text") or "")[:220],
+                    "start": span.get("start"),
+                    "end": span.get("end"),
+                    "direct_format": span.get("direct_format") or {},
+                    "effective_format": span.get("effective_format") or {},
+                    "source": "visible Word run referencing w:rStyle; effective format includes resolved character style when available",
+                })
+
+    collect_character_style_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_character_style_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_character_style_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_character_style_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_character_style_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_character_style_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_character_style_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_character_style_references(endnote_samples, "endnote", part="word/endnotes.xml")
+
+    theme_format_samples = []
+
+    def collect_theme_format_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for span in record.get("format_spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                font = ((span.get("effective_format") or {}).get("font") or {})
+                color_theme = font.get("color_theme") if isinstance(font.get("color_theme"), dict) else {}
+                font_theme = font.get("font_theme") if isinstance(font.get("font_theme"), dict) else {}
+                if not color_theme and not font_theme:
+                    continue
+                theme_format_samples.append({
+                    "evidence_kind": "visible_run_span",
+                    "scope": scope,
+                    "part": part,
+                    "table_index": table_index,
+                    "row_index": cell[0] if cell else None,
+                    "column_index": cell[1] if cell else None,
+                    "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                    "style_id": record.get("style_id"),
+                    "style_name": record.get("style_name"),
+                    "text": str(span.get("text") or "")[:220],
+                    "start": span.get("start"),
+                    "end": span.get("end"),
+                    "theme_color": color_theme,
+                    "theme_font": font_theme,
+                    "effective_format": span.get("effective_format") or {},
+                    "source": "visible Word run with theme color/font reference in effective formatting",
+                })
+
+    collect_theme_format_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_theme_format_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_theme_format_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_theme_format_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_theme_format_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_theme_format_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_theme_format_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_theme_format_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        font = ((style.get("effective_format") or {}).get("font") or {})
+        color_theme = font.get("color_theme") if isinstance(font.get("color_theme"), dict) else {}
+        font_theme = font.get("font_theme") if isinstance(font.get("font_theme"), dict) else {}
+        if color_theme or font_theme:
+            theme_format_samples.append({
+                "evidence_kind": "named_style_rule",
+                "style_id": style.get("style_id"),
+                "style_name": style.get("name"),
+                "style_type": style.get("type"),
+                "theme_color": color_theme,
+                "theme_font": font_theme,
+                "effective_format": style.get("effective_format") or {},
+                "source": "effective Word named style with theme color/font reference; no visible-run confirmation implied",
+            })
+    theme_format_evidence = {
+        "present": bool(theme_format_samples),
+        "definition": theme_definition,
+        "samples": theme_format_samples,
+        "source": "official Word theme part plus visible/theme-style references",
+    }
+
+    # Language, complex-script emphasis, and RTL direction affect which glyphs
+    # Word lays out.  They are not safe global font defaults.  Retain every raw
+    # span in the normal paragraph inventory and expose only bounded, local
+    # review groups here so an agent can map a real source role without being
+    # swamped by inherited language aliases.
+    script_language_keys = (
+        "language", "complex_bold", "complex_italic", "right_to_left", "complex_script",
+    )
+    script_language_groups: dict[str, dict] = {}
+    script_language_raw_occurrence_count = 0
+
+    def add_script_language_group(
+        identity: dict,
+        *,
+        example: dict | None = None,
+    ) -> None:
+        nonlocal script_language_raw_occurrence_count
+        key = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        group = script_language_groups.get(key)
+        if group is None:
+            group = {
+                **identity,
+                "occurrence_count": 0,
+                "examples": [],
+                "source": "bounded run script/language review group; original run boundaries remain in source_inventory.json",
+            }
+            script_language_groups[key] = group
+        group["occurrence_count"] += 1
+        script_language_raw_occurrence_count += 1
+        if example is not None and len(group["examples"]) < 5 and example not in group["examples"]:
+            group["examples"].append(example)
+
+    def collect_script_language_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for span in record.get("format_spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                direct_run = ((span.get("direct_format") or {}).get("run") or {})
+                effective_run = ((span.get("effective_format") or {}).get("run") or {})
+                direct_values = {key: direct_run.get(key) for key in script_language_keys if key in direct_run}
+                effective_values = {key: effective_run.get(key) for key in script_language_keys if key in effective_run}
+                if not direct_values and not effective_values:
+                    continue
+                add_script_language_group({
+                    "evidence_kind": "visible_run_span",
+                    "scope": scope,
+                    "part": part,
+                    "table_index": table_index,
+                    "style_id": record.get("style_id"),
+                    "style_name": record.get("style_name"),
+                    "direct_properties": direct_values,
+                    "effective_properties": effective_values,
+                }, example={
+                    "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                    "table_index": table_index,
+                    "row_index": cell[0] if cell else None,
+                    "column_index": cell[1] if cell else None,
+                    "start": span.get("start"),
+                    "end": span.get("end"),
+                    "text": str(span.get("text") or "")[:180],
+                })
+
+    collect_script_language_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_script_language_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_script_language_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_script_language_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_script_language_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_script_language_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_script_language_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_script_language_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        effective_run = ((style.get("effective_format") or {}).get("run") or {})
+        values = {key: effective_run.get(key) for key in script_language_keys if key in effective_run}
+        if not values:
+            continue
+        add_script_language_group({
+            "evidence_kind": "named_style_rule",
+            "style_id": style.get("style_id"),
+            "style_name": style.get("name"),
+            "style_type": style.get("type"),
+            "direct_properties": {
+                key: value for key, value in (((style.get("direct_format") or {}).get("run") or {}).items())
+                if key in script_language_keys
+            },
+            "effective_properties": values,
+        })
+    script_language_groups_list = sorted(
+        script_language_groups.values(),
+        key=lambda item: (
+            str(item.get("evidence_kind") or ""), str(item.get("scope") or ""), str(item.get("part") or ""),
+            str(item.get("style_id") or ""),
+            int(item.get("table_index")) if isinstance(item.get("table_index"), int) else -1,
+            json.dumps(item.get("direct_properties") or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(item.get("effective_properties") or {}, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+
+    def script_language_group_is_relevant(group: dict) -> tuple[bool, str]:
+        properties = group.get("effective_properties") or {}
+        example_text = " ".join(str(item.get("text") or "") for item in (group.get("examples") or []) if isinstance(item, dict))
+        has_cjk_text = bool(re.search(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", example_text))
+        has_complex_script_text = bool(re.search(r"[\u0590-\u08ff\ufb50-\ufdff\ufe70-\ufeff]", example_text))
+        if properties.get("right_to_left") is True:
+            return True, "active_rtl_direction"
+        if properties.get("complex_script") is True and has_complex_script_text:
+            return True, "active_complex_script_with_matching_text"
+        language_values = properties.get("language") if isinstance(properties.get("language"), dict) else {}
+        primary_tag = str(language_values.get("val") or "").strip().lower()
+        east_asian_tag = str(language_values.get("eastAsia") or "").strip().lower()
+        # English language slots and bCs/iCs defaults are common Office
+        # inheritance. Preserve them as provenance, but do not create a gate
+        # until the source contains a non-English primary language or matching
+        # complex/CJK text. In particular, an unused bidi=ar-SA fallback must
+        # not make an otherwise English template RTL.
+        if primary_tag and not primary_tag.startswith("en"):
+            return True, "nondefault_primary_language_slot"
+        if east_asian_tag and not east_asian_tag.startswith("en") and has_cjk_text:
+            return True, "east_asian_language_with_matching_text"
+        if has_complex_script_text and any(properties.get(key) is True for key in ("complex_bold", "complex_italic")):
+            return True, "complex_script_emphasis_with_matching_text"
+        return False, "observed_default_language_or_disabled_complex_policy"
+
+    relevance_reasons = [script_language_group_is_relevant(group)[1] for group in script_language_groups_list]
+    relevant_script_language_groups = [
+        group for group in script_language_groups_list if script_language_group_is_relevant(group)[0]
+    ]
+    if any(reason in {"active_rtl_direction", "active_complex_script_with_matching_text", "complex_script_emphasis_with_matching_text"} for reason in relevance_reasons):
+        script_language_relevance = "active_complex_script_or_rtl"
+    elif relevant_script_language_groups:
+        script_language_relevance = "nondefault_language_slot_or_matching_east_asian_text"
+    elif script_language_groups_list:
+        script_language_relevance = "observed_default_language_or_disabled_complex_policy"
+    else:
+        script_language_relevance = "not_detected"
+    script_language_evidence = {
+        "observed": bool(script_language_groups_list),
+        "present": bool(relevant_script_language_groups),
+        "relevance": script_language_relevance,
+        "raw_occurrence_count": script_language_raw_occurrence_count,
+        "raw_span_boundaries_retained_in": "source_inventory.json: paragraph/table/furniture format_spans; named styles in inspection.styles",
+        "review_grouping": "same evidence kind, scope/part/style/container, and direct/effective language/complex-script/RTL properties; up to five representative spans per group",
+        "review_groups": script_language_groups_list,
+        "source": "visible Word run and named-style language, complex-script emphasis, and RTL direction evidence",
+    }
+
+    text_grid_keys = (
+        "snap_to_grid", "auto_space_de", "auto_space_dn", "kinsoku",
+        "top_line_punctuation", "overflow_punctuation", "text_alignment",
+    )
+    text_grid_sections = [
+        {"section_index": section.get("index"), "text_grid": section.get("text_grid")}
+        for section in sections
+        if isinstance(section, dict) and isinstance(section.get("text_grid"), dict) and section.get("text_grid")
+    ]
+    text_grid_paragraphs = []
+    for paragraph in paragraphs:
+        if not isinstance(paragraph, dict):
+            continue
+        direct_paragraph = (paragraph.get("direct_format") or {}).get("paragraph") or {}
+        values = {key: direct_paragraph.get(key) for key in text_grid_keys if key in direct_paragraph}
+        if values:
+            text_grid_paragraphs.append({
+                "paragraph_index": paragraph.get("index"),
+                "style_id": paragraph.get("style_id"),
+                "style_name": paragraph.get("style_name"),
+                "text": str(paragraph.get("format_span_text") or paragraph.get("text") or "")[:220],
+                "direct_properties": values,
+            })
+    text_grid_styles = []
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        direct_paragraph = (style.get("direct_format") or {}).get("paragraph") or {}
+        values = {key: direct_paragraph.get(key) for key in text_grid_keys if key in direct_paragraph}
+        if values:
+            text_grid_styles.append({
+                "style_id": style.get("style_id"),
+                "style_name": style.get("name"),
+                "style_type": style.get("type"),
+                "direct_properties": values,
+            })
+    text_grid_run_groups: dict[str, dict] = {}
+
+    def collect_run_grid_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        """Index run-level snap-to-grid evidence without duplicating every span.
+
+        The original contiguous spans remain in their paragraph records.  This
+        bounded index gives the model a reviewable route to each local grid
+        policy without turning inherited run properties into thousands of
+        independent layout decisions.
+        """
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            for span in record.get("format_spans", []) or []:
+                if not isinstance(span, dict):
+                    continue
+                direct_run = ((span.get("direct_format") or {}).get("run") or {})
+                effective_run = ((span.get("effective_format") or {}).get("run") or {})
+                if "snap_to_grid" not in direct_run and "snap_to_grid" not in effective_run:
+                    continue
+                identity = {
+                    "scope": scope,
+                    "part": part,
+                    "table_index": table_index,
+                    "row_index": cell[0] if cell else None,
+                    "column_index": cell[1] if cell else None,
+                    "style_id": record.get("style_id"),
+                    "style_name": record.get("style_name"),
+                    "direct_properties": {"snap_to_grid": direct_run.get("snap_to_grid")} if "snap_to_grid" in direct_run else {},
+                    "effective_properties": {"snap_to_grid": effective_run.get("snap_to_grid")} if "snap_to_grid" in effective_run else {},
+                }
+                key = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                group = text_grid_run_groups.get(key)
+                if group is None:
+                    group = {
+                        **identity,
+                        "occurrence_count": 0,
+                        "examples": [],
+                        "source": "bounded run-level grid review group; original span boundaries remain in the source inventory",
+                    }
+                    text_grid_run_groups[key] = group
+                group["occurrence_count"] += 1
+                if len(group["examples"]) < 5:
+                    example = {
+                        "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                        "start": span.get("start"),
+                        "end": span.get("end"),
+                        "text": str(span.get("text") or "")[:180],
+                    }
+                    if example not in group["examples"]:
+                        group["examples"].append(example)
+
+    collect_run_grid_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_run_grid_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_run_grid_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_run_grid_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_run_grid_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_run_grid_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_run_grid_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_run_grid_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    text_grid_run_groups_list = sorted(
+        text_grid_run_groups.values(),
+        key=lambda item: (
+            str(item.get("scope") or ""), str(item.get("part") or ""), str(item.get("style_id") or ""),
+            int(item.get("table_index")) if isinstance(item.get("table_index"), int) else -1,
+            int(item.get("row_index")) if isinstance(item.get("row_index"), int) else -1,
+            int(item.get("column_index")) if isinstance(item.get("column_index"), int) else -1,
+            json.dumps(item.get("effective_properties") or {}, sort_keys=True),
+        ),
+    )
+    def active_text_grid_override(properties: dict) -> bool:
+        for key, value in properties.items():
+            if key == "text_alignment":
+                if str(value or "").strip().lower() not in {"", "auto", "baseline"}:
+                    return True
+            elif value is True:
+                return True
+        return False
+
+    local_text_grid_properties = [
+        *(item.get("direct_properties") or {} for item in text_grid_paragraphs),
+        *(item.get("direct_properties") or {} for item in text_grid_styles),
+        *(item.get("effective_properties") or {} for item in text_grid_run_groups_list),
+    ]
+    def active_doc_grid(grid: dict) -> bool:
+        grid_type = str(grid.get("type") or "").strip().lower()
+        line_pitch = str(grid.get("linePitch") or "").strip()
+        char_space = str(grid.get("charSpace") or "").strip()
+        # Word commonly serializes a bare linePitch=360 docGrid in ordinary
+        # documents. It is retained as observed XML, but does not by itself
+        # justify a CJK/LaTeX grid audit. Explicit grid types, non-baseline
+        # pitch, or character pitch remain layout-relevant source evidence.
+        return bool(grid_type) or (line_pitch not in {"", "360"}) or (char_space not in {"", "0"})
+
+    has_doc_grid = any(active_doc_grid(item.get("text_grid") or {}) for item in text_grid_sections)
+    has_active_override = any(active_text_grid_override(properties) for properties in local_text_grid_properties)
+    cjk_local_override = language_hint in {"zh", "mixed"} and bool(local_text_grid_properties)
+    if has_doc_grid:
+        relevance = "section_doc_grid"
+    elif has_active_override:
+        relevance = "active_local_override"
+    elif cjk_local_override:
+        relevance = "cjk_local_override"
+    else:
+        relevance = "observed_default_doc_grid_or_local_defaults"
+    text_grid_evidence = {
+        "observed": bool(text_grid_sections or text_grid_paragraphs or text_grid_styles or text_grid_run_groups_list),
+        "present": has_doc_grid or has_active_override or cjk_local_override,
+        "relevance": relevance,
+        "sections": text_grid_sections,
+        "paragraphs": text_grid_paragraphs,
+        "styles": text_grid_styles,
+        "run_groups": text_grid_run_groups_list,
+        "source": "Word section docGrid plus direct paragraph/style/run text-grid and East Asian punctuation properties",
+    }
+
+    # Paragraph bidi/text direction controls the paragraph box, alignment, and
+    # start/end indentation; it is therefore separate from a run's RTL glyph
+    # direction. Keep local paragraph records grouped by their real container
+    # while preserving representative cell locations and original paragraphs.
+    paragraph_direction_keys = ("right_to_left", "text_direction")
+    paragraph_direction_groups: dict[str, dict] = {}
+    paragraph_direction_raw_occurrence_count = 0
+
+    def add_paragraph_direction_group(identity: dict, *, example: dict | None = None) -> None:
+        nonlocal paragraph_direction_raw_occurrence_count
+        key = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        group = paragraph_direction_groups.get(key)
+        if group is None:
+            group = {
+                **identity,
+                "occurrence_count": 0,
+                "examples": [],
+                "source": "bounded paragraph-direction review group; original paragraph evidence remains in source_inventory.json",
+            }
+            paragraph_direction_groups[key] = group
+        group["occurrence_count"] += 1
+        paragraph_direction_raw_occurrence_count += 1
+        if example is not None and len(group["examples"]) < 5 and example not in group["examples"]:
+            group["examples"].append(example)
+
+    def collect_paragraph_direction_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            direct_paragraph = ((record.get("direct_format") or {}).get("paragraph") or {})
+            effective_paragraph = ((record.get("effective_format") or {}).get("paragraph") or {})
+            direct_values = {key: direct_paragraph.get(key) for key in paragraph_direction_keys if key in direct_paragraph}
+            effective_values = {key: effective_paragraph.get(key) for key in paragraph_direction_keys if key in effective_paragraph}
+            if not direct_values and not effective_values:
+                continue
+            add_paragraph_direction_group({
+                "evidence_kind": "visible_paragraph",
+                "scope": scope,
+                "part": part,
+                "table_index": table_index,
+                "style_id": record.get("style_id"),
+                "style_name": record.get("style_name"),
+                "direct_properties": direct_values,
+                "effective_properties": effective_values,
+            }, example={
+                "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                "table_index": table_index,
+                "row_index": cell[0] if cell else None,
+                "column_index": cell[1] if cell else None,
+                "text": str(record.get("format_span_text") or record.get("text") or "")[:180],
+            })
+
+    collect_paragraph_direction_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_paragraph_direction_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_paragraph_direction_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_paragraph_direction_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_paragraph_direction_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_paragraph_direction_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_paragraph_direction_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_paragraph_direction_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        if str(style.get("type") or "").lower() not in {"paragraph", "table"}:
+            continue
+        direct_paragraph = ((style.get("direct_format") or {}).get("paragraph") or {})
+        effective_paragraph = ((style.get("effective_format") or {}).get("paragraph") or {})
+        effective_values = {key: effective_paragraph.get(key) for key in paragraph_direction_keys if key in effective_paragraph}
+        if not effective_values:
+            continue
+        add_paragraph_direction_group({
+            "evidence_kind": "named_style_rule",
+            "style_id": style.get("style_id"),
+            "style_name": style.get("name"),
+            "style_type": style.get("type"),
+            "direct_properties": {key: direct_paragraph.get(key) for key in paragraph_direction_keys if key in direct_paragraph},
+            "effective_properties": effective_values,
+        })
+    paragraph_direction_groups_list = sorted(
+        paragraph_direction_groups.values(),
+        key=lambda item: (
+            str(item.get("evidence_kind") or ""), str(item.get("scope") or ""), str(item.get("part") or ""),
+            str(item.get("style_id") or ""), int(item.get("table_index")) if isinstance(item.get("table_index"), int) else -1,
+            json.dumps(item.get("direct_properties") or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(item.get("effective_properties") or {}, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    def paragraph_direction_group_is_relevant(group: dict) -> bool:
+        properties = group.get("effective_properties") or {}
+        if properties.get("right_to_left") is True:
+            return True
+        direction = str(properties.get("text_direction") or "").strip().lower()
+        return bool(direction and direction not in {"lrtb", "lrtb", ""})
+
+    relevant_paragraph_direction_groups = [
+        group for group in paragraph_direction_groups_list if paragraph_direction_group_is_relevant(group)
+    ]
+    paragraph_direction_evidence = {
+        "observed": bool(paragraph_direction_groups_list),
+        "present": bool(relevant_paragraph_direction_groups),
+        "relevance": "active_bidi_or_text_direction" if relevant_paragraph_direction_groups else (
+            "observed_default_or_disabled_direction_policy" if paragraph_direction_groups_list else "not_detected"
+        ),
+        "raw_occurrence_count": paragraph_direction_raw_occurrence_count,
+        "raw_paragraphs_retained_in": "source_inventory.json: paragraph/table/furniture records; named styles in inspection.styles",
+        "review_grouping": "same evidence kind, scope/part/style/table container, and direct/effective paragraph bidi/text-direction policy; up to five representative paragraphs per group",
+        "review_groups": paragraph_direction_groups_list,
+        "source": "visible Word paragraph and named-style bidi/text-direction evidence",
+    }
+
+    # Word's automatic-hyphen and word-wrap settings affect line breaks and
+    # therefore page flow. They are not an instruction to change every LaTeX
+    # paragraph: retain a role-local policy with raw paragraph provenance.
+    paragraph_break_policy_keys = ("suppress_auto_hyphens", "word_wrap")
+    paragraph_break_policy_groups: dict[str, dict] = {}
+    paragraph_break_policy_raw_occurrence_count = 0
+
+    def add_paragraph_break_policy_group(identity: dict, *, example: dict | None = None) -> None:
+        nonlocal paragraph_break_policy_raw_occurrence_count
+        key = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        group = paragraph_break_policy_groups.get(key)
+        if group is None:
+            group = {
+                **identity,
+                "occurrence_count": 0,
+                "examples": [],
+                "source": "bounded paragraph break-policy review group; original paragraph evidence remains in source_inventory.json",
+            }
+            paragraph_break_policy_groups[key] = group
+        group["occurrence_count"] += 1
+        paragraph_break_policy_raw_occurrence_count += 1
+        if example is not None and len(group["examples"]) < 5 and example not in group["examples"]:
+            group["examples"].append(example)
+
+    def collect_paragraph_break_policy_references(
+        records: list[dict],
+        scope: str,
+        *,
+        part: str | None = None,
+        table_index: int | None = None,
+        cell: tuple[int, int] | None = None,
+    ) -> None:
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            direct_paragraph = ((record.get("direct_format") or {}).get("paragraph") or {})
+            effective_paragraph = ((record.get("effective_format") or {}).get("paragraph") or {})
+            direct_values = {key: direct_paragraph.get(key) for key in paragraph_break_policy_keys if key in direct_paragraph}
+            effective_values = {key: effective_paragraph.get(key) for key in paragraph_break_policy_keys if key in effective_paragraph}
+            if not direct_values and not effective_values:
+                continue
+            add_paragraph_break_policy_group({
+                "evidence_kind": "visible_paragraph",
+                "scope": scope,
+                "part": part,
+                "table_index": table_index,
+                "style_id": record.get("style_id"),
+                "style_name": record.get("style_name"),
+                "direct_properties": direct_values,
+                "effective_properties": effective_values,
+            }, example={
+                "paragraph_index": record.get("index") or record.get("paragraph_index"),
+                "table_index": table_index,
+                "row_index": cell[0] if cell else None,
+                "column_index": cell[1] if cell else None,
+                "text": str(record.get("format_span_text") or record.get("text") or "")[:180],
+            })
+
+    collect_paragraph_break_policy_references(paragraphs, "body", part="word/document.xml")
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        table_index = table.get("index") if isinstance(table.get("index"), int) else None
+        collect_paragraph_break_policy_references(table.get("header_cell_samples") or [], "table_header", table_index=table_index)
+        for cell_sample in table.get("cell_format_samples") or []:
+            if not isinstance(cell_sample, dict):
+                continue
+            row = cell_sample.get("row_index")
+            column = cell_sample.get("column_index")
+            cell = (row, column) if isinstance(row, int) and isinstance(column, int) else None
+            collect_paragraph_break_policy_references(cell_sample.get("paragraphs") or [], "table_cell", table_index=table_index, cell=cell)
+    for text_box in text_boxes:
+        if isinstance(text_box, dict):
+            collect_paragraph_break_policy_references(text_box.get("paragraphs") or [], "text_box", part="word/document.xml")
+    for furniture in header_footer_parts:
+        if not isinstance(furniture, dict):
+            continue
+        part = str(furniture.get("part") or "") or None
+        scope = str(furniture.get("kind") or "furniture")
+        collect_paragraph_break_policy_references(furniture.get("paragraphs") or [], scope, part=part)
+        for text_box in furniture.get("text_boxes") or []:
+            if isinstance(text_box, dict):
+                collect_paragraph_break_policy_references(text_box.get("paragraphs") or [], f"{scope}_text_box", part=part)
+    collect_paragraph_break_policy_references(footnote_samples, "footnote", part="word/footnotes.xml")
+    collect_paragraph_break_policy_references(endnote_samples, "endnote", part="word/endnotes.xml")
+    for style in styles:
+        if not isinstance(style, dict):
+            continue
+        if str(style.get("type") or "").lower() not in {"paragraph", "table"}:
+            continue
+        direct_paragraph = ((style.get("direct_format") or {}).get("paragraph") or {})
+        effective_paragraph = ((style.get("effective_format") or {}).get("paragraph") or {})
+        effective_values = {key: effective_paragraph.get(key) for key in paragraph_break_policy_keys if key in effective_paragraph}
+        if not effective_values:
+            continue
+        add_paragraph_break_policy_group({
+            "evidence_kind": "named_style_rule",
+            "style_id": style.get("style_id"),
+            "style_name": style.get("name"),
+            "style_type": style.get("type"),
+            "direct_properties": {key: direct_paragraph.get(key) for key in paragraph_break_policy_keys if key in direct_paragraph},
+            "effective_properties": effective_values,
+        })
+    paragraph_break_policy_groups_list = sorted(
+        paragraph_break_policy_groups.values(),
+        key=lambda item: (
+            str(item.get("evidence_kind") or ""), str(item.get("scope") or ""), str(item.get("part") or ""),
+            str(item.get("style_id") or ""), int(item.get("table_index")) if isinstance(item.get("table_index"), int) else -1,
+            json.dumps(item.get("direct_properties") or {}, ensure_ascii=False, sort_keys=True),
+            json.dumps(item.get("effective_properties") or {}, ensure_ascii=False, sort_keys=True),
+        ),
+    )
+    def paragraph_break_policy_group_is_relevant(group: dict) -> bool:
+        properties = group.get("effective_properties") or {}
+        # Word normally permits wrapping and automatic hyphenation. Explicitly
+        # suppressing hyphenation or disabling wrapping changes page flow; an
+        # explicit true/default is retained but does not create a global gate.
+        return properties.get("suppress_auto_hyphens") is True or properties.get("word_wrap") is False
+
+    relevant_paragraph_break_policy_groups = [
+        group for group in paragraph_break_policy_groups_list if paragraph_break_policy_group_is_relevant(group)
+    ]
+    paragraph_break_policy_evidence = {
+        "observed": bool(paragraph_break_policy_groups_list),
+        "present": bool(relevant_paragraph_break_policy_groups),
+        "relevance": "active_hyphenation_or_wrap_override" if relevant_paragraph_break_policy_groups else (
+            "observed_default_or_permissive_break_policy" if paragraph_break_policy_groups_list else "not_detected"
+        ),
+        "raw_occurrence_count": paragraph_break_policy_raw_occurrence_count,
+        "raw_paragraphs_retained_in": "source_inventory.json: paragraph/table/furniture records; named styles in inspection.styles",
+        "review_grouping": "same evidence kind, scope/part/style/table container, and direct/effective hyphenation/wrap policy; up to five representative paragraphs per group",
+        "review_groups": paragraph_break_policy_groups_list,
+        "source": "visible Word paragraph and named-style automatic-hyphen/word-wrap evidence",
+    }
+    table_style_evidence = []
+    seen_table_styles = set()
+    for table in tables:
+        style = table.get("style_evidence") if isinstance(table, dict) else None
+        style_id = style.get("style_id") if isinstance(style, dict) else None
+        if not isinstance(style, dict) or not style_id or style_id in seen_table_styles:
+            continue
+        seen_table_styles.add(style_id)
+        table_style_evidence.append(style)
     return {
         "kind": "docx",
         "paragraph_evidence_mode": "full" if full_paragraph_evidence else "sampled",
@@ -1956,6 +3565,7 @@ def inspect_docx(
         "heading_candidates": headings[:60],
         "front_matter_candidates": front_matter[:60],
         "tables": tables,
+        "table_style_evidence": table_style_evidence,
         "images": media,
         "body_drawings": body_drawings,
         "vml_shapes": vml_shapes[:100],
@@ -1963,12 +3573,38 @@ def inspect_docx(
         "text_boxes": text_boxes,
         "equations": equations,
         "list_items": list_items,
+        "tab_stop_evidence": tab_stop_evidence[:120],
+        "drop_cap_evidence": [
+            {
+                **item,
+                "following_paragraph": next(
+                    (
+                        candidate.get("text")
+                        for candidate in paragraphs
+                        if candidate.get("index") == item.get("paragraph_index", 0) + 1
+                    ),
+                    None,
+                ),
+            }
+            for item in drop_cap_evidence[:40]
+        ],
+        # Do not truncate local effects: late named styles are often the only
+        # evidence for sparse template roles and must not be displaced by an
+        # earlier run-heavy sample page.
+        "character_effect_evidence": character_effect_evidence,
+        "character_style_evidence": character_style_evidence,
+        "text_grid_evidence": text_grid_evidence,
+        "theme_format_evidence": theme_format_evidence,
+        "script_language_evidence": script_language_evidence,
+        "paragraph_direction_evidence": paragraph_direction_evidence,
+        "paragraph_break_policy_evidence": paragraph_break_policy_evidence,
+        "unmodeled_format_properties": unmodeled_format_properties,
         "toc_evidence": toc_evidence,
         "header_footer_parts": header_footer_parts,
         "footnote_count": len(real_footnotes),
         "endnote_count": len(real_endnotes),
-        "footnote_samples": footnote_samples[:30],
-        "endnote_samples": endnote_samples[:30],
+        "footnote_samples": footnote_samples if full_paragraph_evidence else footnote_samples[:30],
+        "endnote_samples": endnote_samples if full_paragraph_evidence else endnote_samples[:30],
         "footnote_numbering": footnote_numbering,
         "endnote_numbering": endnote_numbering,
         "footnote_references": footnote_references[:40],
@@ -2144,6 +3780,7 @@ def main() -> int:
         "files": files,
     }
     output = Path(args.output).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(inventory, indent=2, ensure_ascii=False), encoding="utf-8")
     print(output)
     return 0

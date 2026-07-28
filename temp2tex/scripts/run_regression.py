@@ -10,6 +10,10 @@ When official LaTeX is absent or cannot produce a local comparison PDF but an
 official Word source exists, the runner falls back to comparing the rendered
 Word template PDF against the compiled Temp2TeX-generated template PDF. It
 keeps the comparison mode explicit instead of weakening the official-LaTeX gate.
+
+This is deterministic tooling baseline, not an LLM skill-execution evaluator.
+It does not load a model, consume model tokens, or complete the evidence-bound
+atomic mapping decisions that a loaded Temp2TeX skill requires.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ STRESS_BODY_SACJ = SKILL_ROOT / "assets" / "regression" / "stress_body_sacj.tex"
 STRESS_BODY_MSR = SKILL_ROOT / "assets" / "regression" / "stress_body_msr.tex"
 STRESS_BODY_TIIS = SKILL_ROOT / "assets" / "regression" / "stress_body_tiis.tex"
 WORD_SOURCE_EXTENSIONS = {".docx", ".docm", ".doc", ".dotx", ".dot", ".dotm", ".rtf"}
+TOOLING_BASELINE_CONFIGURATION = "tooling_baseline"
+TOOLING_BASELINE_RUN_DIR = "tooling_baseline"
 CHALLENGE_MARKERS = (
     "captcha",
     "cloudflare",
@@ -921,17 +927,54 @@ def load_stress_body(body_path: Path, adapter_used: str) -> str:
 
 
 def inject_normalized_stress_body(source: str, stress_body: str) -> tuple[str, str]:
-    """Preserve a source-backed one-column front-matter/two-column body transition."""
-    if r"\twocolumn[" not in source:
-        return stress_body, "none"
+    """Preserve an evidenced front-matter/body column wrapper during injection.
+
+    Replacing a sample manuscript with the fixed fixture must not erase the
+    source's structural transition.  The common forms are a wide front-matter
+    argument to ``\\twocolumn``, a plain ``\\twocolumn`` before the body, and
+    a ``multicols`` environment around the body.  The last form is especially
+    easy to lose because its begin/end commands live in the replaced body.
+    """
     prefix, marker, body = stress_body.partition(r"\tempTwoTexBodyBegin")
     if not marker or not body.strip():
         return stress_body, "none"
-    return (
-        rf"\twocolumn[" + "\n" + prefix.rstrip() + "\n]\n\n"
-        + marker + body,
-        "twocolumn_front_matter",
+
+    if r"\twocolumn[" in source:
+        return (
+            rf"\twocolumn[" + "\n" + prefix.rstrip() + "\n]\n\n"
+            + marker + body,
+            "twocolumn_front_matter",
+        )
+
+    # Preserve a concrete multicolumn body wrapper before considering the
+    # generic command form.  Match the source count rather than assuming two
+    # columns so a nonstandard publisher template stays inspectable.
+    multicols = re.search(
+        r"\\begin\s*\{\s*multicols\*?\s*\}\s*\{\s*(\d+)\s*\}",
+        source,
+        flags=re.IGNORECASE,
     )
+    if multicols:
+        environment = "multicols*" if "multicols*" in multicols.group(0).lower() else "multicols"
+        count = multicols.group(1)
+        return (
+            prefix.rstrip()
+            + f"\n\\begin{{{environment}}}{{{count}}}\n\n"
+            + marker
+            + body.rstrip()
+            + f"\n\\end{{{environment}}}\n",
+            f"{environment}_body_{count}",
+        )
+
+    # A plain transition is normally a next-page Word section boundary.  Keep
+    # it instead of flattening the normalized fixture to one column.  Its
+    # exact page-break behavior remains a renderer-verified requirement.
+    if re.search(r"\\twocolumn\b", source):
+        return (
+            prefix.rstrip() + "\n\\twocolumn\n\n" + marker + body,
+            "twocolumn_body",
+        )
+    return stress_body, "none"
 
 
 def project_supports_journalfigure(root: Path) -> bool:
@@ -1094,7 +1137,13 @@ def strip_source_front_matter_metadata(preamble: str) -> tuple[str, list[str]]:
     return "".join(kept), removed
 
 
-def make_normalized_project(src_root: Path, main_tex: Path, dest_root: Path, adapter: str | None = None) -> tuple[Path | None, dict]:
+def make_normalized_project(
+    src_root: Path,
+    main_tex: Path,
+    dest_root: Path,
+    adapter: str | None = None,
+    preserve_existing_fixture: bool = False,
+) -> tuple[Path | None, dict]:
     if dest_root.exists():
         shutil.rmtree(dest_root)
     shutil.copytree(src_root, dest_root)
@@ -1104,6 +1153,16 @@ def make_normalized_project(src_root: Path, main_tex: Path, dest_root: Path, ada
         rel_main = Path(main_tex.name)
         shutil.copy2(main_tex, dest_root / rel_main)
     dest_original = dest_root / rel_main
+    if preserve_existing_fixture:
+        return dest_original, {
+            "ok": True,
+            "source_root": str(src_root),
+            "source_main": str(main_tex),
+            "normalized_root": str(dest_root),
+            "normalized_main": str(dest_original),
+            "fixture_mode": "preserved_generated_regression_fixture",
+            "stripped_source_metadata_commands": [],
+        }
     normalized_main = dest_original.parent / "temp2tex_regression_main.tex"
     try:
         source = dest_original.read_text(encoding="utf-8", errors="replace")
@@ -1205,19 +1264,30 @@ def render_word_reference(word_source: Path, outdir: Path) -> dict:
     }
 
 
-def render_normalized_word_reference(word_source: Path, outdir: Path) -> dict:
+def render_normalized_word_reference(word_source: Path, outdir: Path, fixture_language: str = "en") -> dict:
     normalized_docx = outdir / "normalized_word_reference.docx"
     normalization_report_path = outdir / "word_normalization_report.json"
+    anchor_contract_path = outdir / "same_content_anchor_contract.json"
+    fixture_language = str(fixture_language or "en").lower()
+    normalization_args = [
+        sys.executable,
+        str(SCRIPT_DIR / "normalize_word_stress.py"),
+        str(word_source),
+        "--output",
+        str(normalized_docx),
+        "--report",
+        str(normalization_report_path),
+        "--anchors-output",
+        str(anchor_contract_path),
+        "--fixture-language",
+        fixture_language if fixture_language in {"en", "zh", "mixed"} else "en",
+    ]
+    # The CJK normalizer profile mirrors the ordinary editable CJK package.
+    # English instead uses the explicit regression-stress generated profile.
+    if fixture_language in {"zh", "mixed"}:
+        normalization_args.extend(["--fixture-profile", "latex-default"])
     normalization_command = run_command(
-        [
-            sys.executable,
-            str(SCRIPT_DIR / "normalize_word_stress.py"),
-            str(word_source),
-            "--output",
-            str(normalized_docx),
-            "--report",
-            str(normalization_report_path),
-        ],
+        normalization_args,
         timeout=240,
     )
     normalization_report = read_json(normalization_report_path) if normalization_report_path.exists() else {}
@@ -1228,11 +1298,24 @@ def render_normalized_word_reference(word_source: Path, outdir: Path) -> dict:
         "normalization_report_path": str(normalization_report_path) if normalization_report_path.exists() else None,
         "normalization_report": normalization_report,
         "normalization_command": normalization_command,
+        "anchor_contract_path": str(anchor_contract_path) if anchor_contract_path.exists() else None,
     }
     if not (normalization_report.get("success") and normalized_docx.exists()):
         result["error"] = "official Word template could not be normalized with the fixed stress manuscript"
         return result
     render = render_word_reference(normalized_docx, outdir / "render")
+    selected_renderer = None
+    selected_pdf = str(render.get("pdf") or "")
+    for item in (render.get("report") or {}).get("results", []):
+        if isinstance(item, dict) and str(item.get("pdf") or "") == selected_pdf:
+            selected_renderer = item.get("renderer")
+            break
+    section_flow = normalization_report.get("section_flow_preservation") or {}
+    requires_word_native_renderer = (
+        isinstance(section_flow, dict)
+        and str(section_flow.get("latex_mode") or "").lower() == "new_page"
+    )
+    layout_calibration_eligible = not requires_word_native_renderer or selected_renderer == "microsoft-word"
     result.update(
         {
             "success": render.get("success", False),
@@ -1240,24 +1323,40 @@ def render_normalized_word_reference(word_source: Path, outdir: Path) -> dict:
             "report_path": render.get("report_path"),
             "report": render.get("report"),
             "render_command": render.get("command"),
+            "selected_renderer": selected_renderer,
+            "layout_calibration_eligible": layout_calibration_eligible,
+            "layout_calibration_reason": (
+                None
+                if layout_calibration_eligible
+                else "The normalized Word fixture preserves a next-page one-column-to-multicolumn section transition; use Microsoft Word rendering before treating its PDF as layout-calibration evidence."
+            ),
         }
     )
     return result
 
 
-def compare_pdfs(reference_pdf: Path, generated_pdf: Path, outdir: Path, max_pages: int = 30) -> dict:
+def compare_pdfs(
+    reference_pdf: Path,
+    generated_pdf: Path,
+    outdir: Path,
+    max_pages: int = 30,
+    anchors_json: Path | None = None,
+) -> dict:
     outdir.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        str(SCRIPT_DIR / "compare_pdfs.py"),
+        str(reference_pdf),
+        str(generated_pdf),
+        "--outdir",
+        str(outdir),
+        "--max-pages",
+        str(max_pages),
+    ]
+    if anchors_json and anchors_json.is_file():
+        command.extend(["--anchors-json", str(anchors_json)])
     result = run_command(
-        [
-            sys.executable,
-            str(SCRIPT_DIR / "compare_pdfs.py"),
-            str(reference_pdf),
-            str(generated_pdf),
-            "--outdir",
-            str(outdir),
-            "--max-pages",
-            str(max_pages),
-        ],
+        command,
         cwd=outdir.parent,
         timeout=240,
     )
@@ -1297,11 +1396,18 @@ def choose_word_source(inputs_dir: Path, preferred_patterns: list[str] | None = 
     return sorted(candidates, key=lambda path: (-score_word_source(path, preferred_patterns), str(path).lower()))[0]
 
 
-def build_temp2tex_package(case_root: Path, word_source: Path) -> dict:
+def build_temp2tex_package(
+    case_root: Path,
+    word_source: Path,
+    prior_atomic_decisions: Path | None = None,
+) -> dict:
     outputs = case_root / "temp2tex"
+    if outputs.exists():
+        shutil.rmtree(outputs)
     outputs.mkdir(parents=True, exist_ok=True)
     inventory = outputs / "source_inventory.json"
     spec = outputs / "template_spec.json"
+    format_ledger = outputs / "word_format_ledger.json"
     notes = outputs / "official_notes.txt"
     source_text_parts = []
     for text_file in sorted((case_root / "source_pages").glob("*.txt")):
@@ -1309,11 +1415,28 @@ def build_temp2tex_package(case_root: Path, word_source: Path) -> dict:
     notes.write_text("\n\n".join(source_text_parts), encoding="utf-8")
     commands = []
     commands.append(run_command([sys.executable, str(SCRIPT_DIR / "inspect_sources.py"), str(word_source), "--output", str(inventory)], timeout=180))
+    # A readable OpenXML template supplies the atomic evidence worklist. Keep
+    # this in the regression package as pending model work rather than letting
+    # a layout comparison hide unreviewed paragraph/run mappings.
+    ledger_command = [
+        sys.executable,
+        str(SCRIPT_DIR / "build_word_format_ledger.py"),
+        str(word_source),
+        "--output",
+        str(format_ledger),
+    ]
+    if word_source.suffix.lower() in {".doc", ".dot", ".rtf"}:
+        ledger_command.extend(["--retain-derived-docx", "derived/legacy-inspection.docx"])
+    commands.append(run_command(ledger_command, timeout=180))
     if inventory.exists():
         commands.append(run_command([sys.executable, str(SCRIPT_DIR / "draft_spec_from_inventory.py"), str(inventory), "--notes", str(notes), "--output", str(spec)], timeout=180))
     package_dir = outputs / "latex-package"
     assets_skipped_for_legacy_source = False
     if spec.exists():
+        try:
+            generated_language = str((read_json(spec).get("journal") or {}).get("language", "en")).lower()
+        except Exception:
+            generated_language = "en"
         generate_command = [
             sys.executable,
             str(SCRIPT_DIR / "generate_latex_package.py"),
@@ -1321,6 +1444,17 @@ def build_temp2tex_package(case_root: Path, word_source: Path) -> dict:
             "--outdir",
             str(package_dir),
         ]
+        # The Word normalizer uses a fixed English stress manuscript. Request
+        # the matching generated fixture only in the regression pipeline;
+        # ordinary skill output remains the editable starter package.
+        if generated_language == "en":
+            generate_command.extend(["--fixture-profile", "regression-stress"])
+        # Regression-only neutral raster frames match the Word normalizer's
+        # image representation. Their interiors are masked later, while frame
+        # geometry, captions, and page flow remain comparison signals.
+        generate_command.append("--comparison-fixture-artwork")
+        if format_ledger.exists():
+            generate_command.extend(["--format-ledger", str(format_ledger)])
         # Asset extraction is optional evidence in a regression. A legacy
         # binary can make LibreOffice spend minutes converting media and hide
         # a useful class/compile result, so keep the original source for
@@ -1330,10 +1464,144 @@ def build_temp2tex_package(case_root: Path, word_source: Path) -> dict:
         else:
             assets_skipped_for_legacy_source = True
         commands.append(run_command(generate_command, timeout=180))
+    package_ledger = package_dir / "word_format_ledger.json"
+    system_format_triage = package_dir / "system_format_triage.json"
+    system_format_triage_markdown = package_dir / "system_format_triage.md"
+    atomic_decisions = package_dir / "atomic_mapping_decisions.json"
+    atomic_audit = package_dir / "atomic_mapping_audit.json"
+    atomic_review = package_dir / "atomic_mapping_review.md"
+    atomic_review_json = package_dir / "atomic_mapping_review.json"
+    atomic_review_batch = package_dir / "atomic_mapping_review_batch_001.md"
+    atomic_review_batch_json = package_dir / "atomic_mapping_review_batch_001.json"
+    atomic_batch_template = package_dir / "atomic_mapping_batch_001_draft.json"
+    atomic_reconciliation = package_dir / "atomic_mapping_reconciliation.json"
+    readiness = package_dir / "conversion_readiness.json"
+    readiness_markdown = package_dir / "conversion_readiness.md"
+    imported_decisions: Path | None = None
+    if package_dir.exists() and package_ledger.exists():
+        commands.append(run_command([
+            sys.executable,
+            str(SCRIPT_DIR / "prepare_system_format_triage.py"),
+            str(package_ledger),
+            "--output",
+            str(system_format_triage),
+            "--markdown-output",
+            str(system_format_triage_markdown),
+        ], timeout=180))
+        if prior_atomic_decisions is not None:
+            if prior_atomic_decisions.is_file():
+                imported_decisions = prior_atomic_decisions.resolve()
+                commands.append(run_command([
+                    sys.executable,
+                    str(SCRIPT_DIR / "reconcile_atomic_mapping_decisions.py"),
+                    str(package_ledger),
+                    "--decisions",
+                    str(imported_decisions),
+                    "--output",
+                    str(atomic_decisions),
+                    "--report",
+                    str(atomic_reconciliation),
+                ], timeout=180))
+            else:
+                commands.append({
+                    "cmd": ["atomic-decision-import", str(prior_atomic_decisions)],
+                    "returncode": 2,
+                    "stderr_tail": "Configured prior atomic decisions file does not exist; generated a fresh pending review queue.",
+                })
+        audit_command = [
+            sys.executable,
+            str(SCRIPT_DIR / "audit_atomic_mapping.py"),
+            str(package_ledger),
+        ]
+        if atomic_decisions.exists():
+            audit_command.extend(["--decisions", str(atomic_decisions)])
+        else:
+            audit_command.extend(["--starter", str(atomic_decisions)])
+        audit_command.extend([
+            "--package",
+            str(package_dir),
+            "--system-triage",
+            str(system_format_triage),
+            "--output",
+            str(atomic_audit),
+        ])
+        commands.append(run_command(audit_command, timeout=180))
+        commands.append(run_command([
+            sys.executable,
+            str(SCRIPT_DIR / "prepare_atomic_mapping_review.py"),
+            str(package_ledger),
+            "--decisions",
+            str(atomic_decisions),
+            "--package",
+            str(package_dir),
+            "--output",
+            str(atomic_review),
+            "--json-output",
+            str(atomic_review_json),
+        ], timeout=180))
+        commands.append(run_command([
+            sys.executable,
+            str(SCRIPT_DIR / "prepare_atomic_mapping_review.py"),
+            str(package_ledger),
+            "--decisions",
+            str(atomic_decisions),
+            "--package",
+            str(package_dir),
+            "--output",
+            str(atomic_review_batch),
+            "--json-output",
+            str(atomic_review_batch_json),
+            "--batch-size",
+            "20",
+            "--batch-index",
+            "1",
+            "--batch-template-output",
+            str(atomic_batch_template),
+        ], timeout=180))
+        if inventory.exists() and spec.exists():
+            commands.append(run_command([
+                sys.executable,
+                str(SCRIPT_DIR / "audit_source_feature_coverage.py"),
+                str(inventory),
+                str(spec),
+                "--package",
+                str(package_dir),
+                "--format-ledger",
+                str(package_ledger),
+                "--atomic-audit",
+                str(atomic_audit),
+                "--output",
+                str(package_dir / "source_feature_coverage.json"),
+            ], timeout=180))
+    if package_dir.exists():
+        commands.append(run_command([
+            sys.executable,
+            str(SCRIPT_DIR / "assess_conversion_readiness.py"),
+            str(package_dir),
+            "--output",
+            str(readiness),
+            "--markdown-output",
+            str(readiness_markdown),
+        ], timeout=180))
     return {
         "ok": package_dir.exists() and (package_dir / "main.tex").exists(),
         "source_inventory": str(inventory) if inventory.exists() else None,
         "template_spec": str(spec) if spec.exists() else None,
+        "word_format_ledger": str(package_ledger) if package_ledger.exists() else None,
+        "system_format_triage": str(system_format_triage) if system_format_triage.exists() else None,
+        "system_format_triage_markdown": str(system_format_triage_markdown) if system_format_triage_markdown.exists() else None,
+        "atomic_mapping_decisions": str(atomic_decisions) if atomic_decisions.exists() else None,
+        "atomic_mapping_audit": str(atomic_audit) if atomic_audit.exists() else None,
+        "atomic_mapping_review": str(atomic_review) if atomic_review.exists() else None,
+        "atomic_mapping_review_json": str(atomic_review_json) if atomic_review_json.exists() else None,
+        "atomic_mapping_review_batch": str(atomic_review_batch) if atomic_review_batch.exists() else None,
+        "atomic_mapping_review_batch_json": str(atomic_review_batch_json) if atomic_review_batch_json.exists() else None,
+        "atomic_mapping_batch_draft": str(atomic_batch_template) if atomic_batch_template.exists() else None,
+        "atomic_mapping_reconciliation": str(atomic_reconciliation) if atomic_reconciliation.exists() else None,
+        "prior_atomic_decisions": str(imported_decisions) if imported_decisions is not None else None,
+        "conversion_readiness": str(readiness) if readiness.exists() else None,
+        "conversion_readiness_markdown": str(readiness_markdown) if readiness_markdown.exists() else None,
+        "word_source_requires_atomic_audit": True,
         "package_dir": str(package_dir) if package_dir.exists() else None,
         "commands": commands,
         "assets_skipped_for_legacy_source": assets_skipped_for_legacy_source,
@@ -1353,6 +1621,12 @@ def generate_variant_package(spec: dict, spec_path: Path, package_dir: Path, wor
     variant_spec = package_dir / "template_spec.json"
     write_json(variant_spec, spec)
     command_args = [sys.executable, str(SCRIPT_DIR / "generate_latex_package.py"), str(variant_spec), "--outdir", str(package_dir)]
+    # Variants are regression artifacts, not ordinary user deliveries. Keep
+    # their manuscript identical to the normalized Word fixture so a selected
+    # layout candidate cannot win merely by changing text or front matter.
+    if str(((spec.get("journal") or {}).get("language") or "en")).lower() == "en":
+        command_args.extend(["--fixture-profile", "regression-stress"])
+    command_args.append("--comparison-fixture-artwork")
     if any(
         str((((spec.get(owner) or {}).get("render_calibration") or {}).get("status", ""))).lower() == "render_probe"
         for owner in ("page", "document")
@@ -1519,6 +1793,29 @@ def build_temp2tex_variants(
                 "status": "render_probe",
                 "mode": "nonfloating",
                 "source": "Word table flow candidate; requires strict same-content PDF promotion",
+            },
+        })
+    if (
+        (enabled or (figure_placement_probe and table_placement_probe))
+        and isinstance(figure_layout, dict)
+        and str(figure_layout.get("drawing_type") or "").lower() == "inline"
+        and isinstance(table_layout, dict)
+        and table_layout
+    ):
+        # Word may keep both object classes in the manuscript stream. Testing
+        # each independently can leave the other float to reorder the page,
+        # so offer one bounded combined candidate rather than a cross-product
+        # of unrelated visual probes.
+        add_variant("inline-table-and-figure-placement-probe", {
+            "figures.layout_evidence.placement_calibration": {
+                "status": "render_probe",
+                "mode": "nonfloating",
+                "source": "Word inline drawing and table-flow candidate; requires strict same-content PDF promotion",
+            },
+            "tables.layout_evidence.placement_calibration": {
+                "status": "render_probe",
+                "mode": "nonfloating",
+                "source": "Word inline drawing and table-flow candidate; requires strict same-content PDF promotion",
             },
         })
     text_boxes = (base_spec.get("assets") or {}).get("text_boxes", [])
@@ -1942,6 +2239,84 @@ def validate_reference_geometry(official_pdf: Path | None, word_pdf: Path | None
     }
 
 
+def word_column_transition_requirement(temp2tex_report: dict) -> dict:
+    """Return the explicit Word one-to-many-column transition, when present.
+
+    The Word template is the conversion source.  An official LaTeX sample can
+    be a useful second reference only when it retains the same structural
+    transition; page size and page count alone cannot establish that.
+    """
+    spec_path = temp2tex_report.get("template_spec") if isinstance(temp2tex_report, dict) else None
+    if not spec_path:
+        return {"available": False, "compatible": None, "reason": "Word template_spec.json is unavailable."}
+    try:
+        spec = read_json(Path(spec_path))
+    except Exception as exc:
+        return {"available": False, "compatible": None, "reason": f"Could not read Word template_spec.json: {exc}"}
+    section_flow = ((spec.get("page") or {}).get("section_flow") or {}).get("sections") or []
+    if not isinstance(section_flow, list):
+        return {"available": False, "compatible": None, "reason": "Word section-flow evidence is unavailable."}
+
+    def column_count(item: dict) -> int:
+        value = item.get("columns")
+        if value in (None, "", "1"):
+            return 1
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return 1
+
+    for index in range(1, len(section_flow)):
+        previous = section_flow[index - 1] if isinstance(section_flow[index - 1], dict) else {}
+        current = section_flow[index] if isinstance(section_flow[index], dict) else {}
+        previous_columns = column_count(previous)
+        current_columns = column_count(current)
+        if previous_columns == 1 and current_columns > 1:
+            break_type = str(previous.get("section_break_type") or "unspecified").lower()
+            mode = "new_page" if break_type == "nextpage" else "continuous"
+            return {
+                "available": True,
+                "compatible": None,
+                "from_section_index": previous.get("index", index),
+                "to_section_index": current.get("index", index + 1),
+                "from_columns": previous_columns,
+                "to_columns": current_columns,
+                "word_break_type": break_type,
+                "required_latex_mode": mode,
+            }
+    return {"available": False, "compatible": None, "reason": "No explicit Word one-to-multicolumn section transition was found."}
+
+
+def validate_official_structural_wrapper(word_requirement: dict, official_normalization: dict) -> dict:
+    """Reject an official golden that lost or contradicts Word column flow."""
+    if not word_requirement.get("available"):
+        return {
+            "available": False,
+            "compatible": None,
+            "reason": word_requirement.get("reason") or "No Word structural requirement needs comparison.",
+        }
+    wrapper = str(official_normalization.get("structural_wrapper") or "none")
+    target_columns = int(word_requirement.get("to_columns") or 2)
+    required_mode = str(word_requirement.get("required_latex_mode") or "continuous")
+    if required_mode == "new_page":
+        accepted = {"twocolumn_body"} if target_columns == 2 else set()
+    else:
+        accepted = {f"multicols_body_{target_columns}", "twocolumn_front_matter"}
+    compatible = wrapper in accepted
+    return {
+        "available": True,
+        "compatible": compatible,
+        "word_requirement": word_requirement,
+        "official_structural_wrapper": wrapper,
+        "accepted_official_wrappers": sorted(accepted),
+        "reason": (
+            "Official normalized LaTeX preserves the Word column-transition mode."
+            if compatible
+            else "Official normalized LaTeX uses a different front-matter/body column transition than the official Word template."
+        ),
+    }
+
+
 def evaluate_outputs(
     case: dict,
     manifest: dict,
@@ -2017,6 +2392,78 @@ def evaluate_outputs(
     }
 
 
+def word_reconstruction_gate(temp2tex_report: dict) -> dict:
+    """Describe whether Word-to-LaTeX mapping is complete enough for tuning."""
+    if not temp2tex_report.get("word_source_requires_atomic_audit"):
+        return {
+            "applicable": False,
+            "complete": None,
+            "calibration_eligible": False,
+            "status": "not_observable",
+            "reason": "The runner has no readable OpenXML Word ledger. Compile/PDF artifacts remain diagnostic until an inspectable Word evidence packet is created.",
+        }
+    ledger_path = Path(temp2tex_report.get("word_format_ledger") or "")
+    decisions_path = Path(temp2tex_report.get("atomic_mapping_decisions") or "")
+    audit_path = Path(temp2tex_report.get("atomic_mapping_audit") or "")
+    if not ledger_path.is_file() or not decisions_path.is_file() or not audit_path.is_file():
+        return {
+            "applicable": True,
+            "complete": False,
+            "calibration_eligible": False,
+            "status": "missing_artifacts",
+            "reason": "Readable OpenXML Word evidence requires a copied ledger, decision worklist, and atomic audit before visual calibration.",
+        }
+    try:
+        ledger = read_json(ledger_path)
+        audit = read_json(audit_path)
+    except Exception as exc:
+        return {
+            "applicable": True,
+            "complete": False,
+            "calibration_eligible": False,
+            "status": "invalid_artifacts",
+            "reason": f"Could not read Word mapping artifacts: {exc}",
+        }
+    complete = bool(
+        isinstance(ledger, dict)
+        and isinstance(audit, dict)
+        and audit.get("audit_complete")
+        and audit.get("fidelity_complete")
+        and audit.get("ledger_fingerprint") == ledger.get("evidence_fingerprint")
+    )
+    return {
+        "applicable": True,
+        "complete": complete,
+        "calibration_eligible": complete,
+        "status": "complete" if complete else "pending_atomic_audit",
+        "reason": (
+            "Every captured Word paragraph/run has a strict, ledger-matched disposition."
+            if complete else
+            "Word paragraph/run mapping remains pending or unresolved; the PDF pair is diagnostic only and cannot drive calibration or a strict skill pass."
+        ),
+        "ledger_path": str(ledger_path),
+        "decisions_path": str(decisions_path),
+        "audit_path": str(audit_path),
+        "summary": audit.get("summary") if isinstance(audit, dict) else None,
+    }
+
+
+def attach_word_reconstruction_gate(evaluation: dict, gate: dict) -> dict:
+    """Keep visual diagnostics while preventing an incomplete mapping from passing."""
+    result = dict(evaluation)
+    visual_status = str(result.get("status") or "unknown")
+    result["visual_regression_status"] = visual_status
+    result["word_reconstruction_gate"] = gate
+    result["word_reconstruction_complete"] = gate.get("complete")
+    # An unfinished Word audit is neither a source-comparability failure nor a
+    # visual result. Preserve any hard compile/renderer failure, but classify a
+    # passed or unattempted/not-comparable PDF route as pending mapping work so
+    # corpus summaries do not conflate it with an unusable reference case.
+    if gate.get("applicable") and not gate.get("complete") and visual_status in {"passed", "not_comparable"}:
+        result["status"] = "pending_atomic_audit"
+    return result
+
+
 def grade_case(case: dict, comparable: bool, evaluation: dict, reports: dict) -> dict:
     source_page_ok = any(item.get("ok") for item in reports.get("source_page_reports") or [])
     direct_word_url = case.get("doc_template_url")
@@ -2033,6 +2480,7 @@ def grade_case(case: dict, comparable: bool, evaluation: dict, reports: dict) ->
     )
     source_provenance_ok = source_page_ok or direct_word_ok or local_word_provenance
     comparison_mode = reports.get("comparison_mode") or evaluation.get("comparison_mode") or "official_latex"
+    reconstruction = evaluation.get("word_reconstruction_gate") or reports.get("word_reconstruction") or {}
     if comparison_mode == "word_render_fallback":
         expectations = [
             ("Official source provenance is captured", source_provenance_ok),
@@ -2057,6 +2505,11 @@ def grade_case(case: dict, comparable: bool, evaluation: dict, reports: dict) ->
             ("Layered visual diff thresholds pass", bool(evaluation.get("visual_passed"))),
             ("Case is comparable and does not require replacement", comparable and evaluation.get("status") != "not_comparable"),
         ]
+    if isinstance(reconstruction, dict) and reconstruction.get("applicable"):
+        expectations.append((
+            "Word paragraph/run reconstruction audit is complete before a strict regression pass",
+            reconstruction.get("complete") is True,
+        ))
     graded = []
     for text, passed in expectations:
         graded.append({
@@ -2090,6 +2543,9 @@ def grade_case(case: dict, comparable: bool, evaluation: dict, reports: dict) ->
 
 
 def evidence_for(text: str, passed: bool, evaluation: dict, reports: dict) -> str:
+    if "Word paragraph/run reconstruction audit" in text:
+        gate = evaluation.get("word_reconstruction_gate") or reports.get("word_reconstruction") or {}
+        return str(gate.get("reason") or "No Word reconstruction gate report was recorded.")
     if "source provenance" in text:
         reports_list = reports.get("source_page_reports") or []
         ok_count = sum(1 for item in reports_list if item.get("ok"))
@@ -2173,6 +2629,19 @@ def copy_outputs_for_review(case_root: Path, outputs_dir: Path) -> None:
         case_root / "discovered_links.json",
         case_root / "temp2tex" / "source_inventory.json",
         case_root / "temp2tex" / "template_spec.json",
+        case_root / "temp2tex" / "latex-package" / "word_format_ledger.json",
+        case_root / "temp2tex" / "latex-package" / "system_format_triage.json",
+        case_root / "temp2tex" / "latex-package" / "system_format_triage.md",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_decisions.json",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_audit.json",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_review.md",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_review.json",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_review_batch_001.md",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_review_batch_001.json",
+        case_root / "temp2tex" / "latex-package" / "atomic_mapping_batch_001_draft.json",
+        case_root / "temp2tex" / "latex-package" / "conversion_readiness.json",
+        case_root / "temp2tex" / "latex-package" / "conversion_readiness.md",
+        case_root / "temp2tex" / "latex-package" / "source_feature_coverage.json",
     ]:
         if src.exists():
             shutil.copy2(src, outputs_dir / src.name)
@@ -2248,6 +2717,8 @@ def evaluate_temp2tex_variants(
     generated_compile_engine: str | None,
     comparison_mode: str = "official_latex",
     comparison_dir_name: str = "official-vs-temp2tex",
+    preserve_generated_fixture: bool = False,
+    anchors_json: Path | None = None,
 ) -> dict:
     official_pdf = Path(official_compile.get("pdf") or "") if official_compile.get("success") is True and official_compile.get("pdf") else None
     results = []
@@ -2262,7 +2733,12 @@ def evaluate_temp2tex_variants(
             continue
         norm_dir = case_root / "temp2tex_normalized_variants" / label
         compare_dir = case_root / f"{comparison_dir_name}-variants" / label
-        temp_norm_main, temp_norm = make_normalized_project(package_dir, package_dir / "main.tex", norm_dir)
+        temp_norm_main, temp_norm = make_normalized_project(
+            package_dir,
+            package_dir / "main.tex",
+            norm_dir,
+            preserve_existing_fixture=preserve_generated_fixture,
+        )
         temp_compile = {"success": False}
         compare_report = {"issues": ["comparison was not attempted"], "comparisons": []}
         evaluation = {"case_id": case["case_id"], "status": "not_comparable", "hard_gate_passed": False, "visual_passed": False, "diff_page_count": 0}
@@ -2274,7 +2750,7 @@ def evaluate_temp2tex_variants(
             )
         temp_pdf = Path(temp_compile.get("pdf") or "") if temp_compile.get("success") is True and temp_compile.get("pdf") else None
         if temp_pdf and temp_pdf.exists():
-            compare_report = compare_pdfs(official_pdf, temp_pdf, compare_dir)
+            compare_report = compare_pdfs(official_pdf, temp_pdf, compare_dir, anchors_json=anchors_json)
             evaluation = evaluate_outputs(
                 case,
                 manifest,
@@ -2324,10 +2800,11 @@ def run_case(
     text_box_placement_probe: bool = False,
     appendix_boundary_probe: bool = False,
     backmatter_boundary_probe: bool = False,
+    atomic_decisions_dir: Path | None = None,
 ) -> dict:
     start = time.time()
     case_root = outdir / case["case_id"]
-    run_dir = case_root / "with_skill"
+    run_dir = case_root / TOOLING_BASELINE_RUN_DIR
     outputs_dir = run_dir / "outputs"
     source_pages = case_root / "source_pages"
     downloads = case_root / "downloads"
@@ -2372,7 +2849,20 @@ def run_case(
         preferred_patterns=case.get("preferred_latex_main_patterns"),
     )
     word_source = choose_word_source(inputs, preferred_patterns=case.get("preferred_word_patterns"))
-    temp2tex_report = build_temp2tex_package(case_root, word_source) if word_source else {"ok": False, "error": "missing Word source"}
+    prior_atomic_decisions = (
+        atomic_decisions_dir / f"{case['case_id']}.json"
+        if atomic_decisions_dir is not None
+        else None
+    )
+    temp2tex_report = (
+        build_temp2tex_package(case_root, word_source, prior_atomic_decisions=prior_atomic_decisions)
+        if word_source
+        else {"ok": False, "error": "missing Word source"}
+    )
+    try:
+        fixture_language = str(((read_json(Path(temp2tex_report.get("template_spec") or "")).get("journal") or {}).get("language") or "en")).lower()
+    except Exception:
+        fixture_language = "en"
 
     reports: dict = {
         "case": case,
@@ -2407,6 +2897,9 @@ def run_case(
         comparison_mode = "missing_reference_source"
     reports["comparison_mode"] = comparison_mode
     comparable = bool(word_source and temp2tex_report.get("ok") and comparison_mode in {"official_latex", "word_render_fallback"})
+    reconstruction_gate = word_reconstruction_gate(temp2tex_report)
+    reports["word_reconstruction"] = reconstruction_gate
+    calibration_eligible = bool(reconstruction_gate.get("calibration_eligible"))
 
     if not word_source:
         reports["needs_review"].append("No official Word/DOCX source was downloaded or configured.")
@@ -2414,6 +2907,10 @@ def run_case(
         reports["needs_review"].append("No official LaTeX main .tex source was found; using Word-rendered PDF comparison fallback when possible.")
     if not temp2tex_report.get("ok"):
         reports["needs_review"].append("Temp2TeX package generation did not produce a main.tex.")
+    if not calibration_eligible:
+        reports["needs_review"].append(
+            "Word paragraph/run reconstruction is incomplete or not observable; PDF output is diagnostic only and variant calibration is disabled."
+        )
 
     if comparable and official_main_tex:
         official_norm_main, official_norm = make_normalized_project(
@@ -2463,13 +2960,25 @@ def run_case(
                 "using the normalized Word-render fallback instead of comparing different manuscripts."
             )
             official_pdf = None
+        structural_requirement = word_column_transition_requirement(temp2tex_report)
+        structural_validation = validate_official_structural_wrapper(structural_requirement, official_norm)
+        reports["official_word_structure_validation"] = structural_validation
+        if official_pdf and structural_validation.get("compatible") is False:
+            reports["needs_review"].append(
+                "Official LaTeX and Word templates disagree on the explicit front-matter/body column transition; "
+                "the Word template remains primary, so the official LaTeX PDF is not a valid calibration golden."
+            )
+            official_pdf = None
         if official_pdf and word_source:
-            word_reference_render = render_normalized_word_reference(word_source, case_root / "word_reference_render")
+            word_reference_render = render_normalized_word_reference(word_source, case_root / "word_reference_render", fixture_language)
             reports["word_reference_render"] = word_reference_render
             word_reference_pdf = Path(word_reference_render.get("pdf") or "") if word_reference_render.get("pdf") else None
             word_fixture_validation = validate_fixture_pdf(word_reference_pdf, required_zones)
             reports["word_fixture_validation"] = word_fixture_validation
-            if word_fixture_validation["valid"]:
+            if not word_reference_render.get("layout_calibration_eligible", True):
+                reports["needs_review"].append(str(word_reference_render.get("layout_calibration_reason")))
+                word_reference_pdf = None
+            if word_reference_pdf and word_fixture_validation["valid"]:
                 geometry_validation = validate_reference_geometry(
                     official_pdf,
                     word_reference_pdf,
@@ -2485,20 +2994,20 @@ def run_case(
 
         if official_pdf and official_pdf.exists():
             variants = build_temp2tex_variants(
-                case_root, temp2tex_report, enabled=variant_search,
-                figure_placement_probe=figure_placement_probe,
-                table_placement_probe=table_placement_probe,
-                float_spacing_probe=float_spacing_probe,
-                table_geometry_probe=table_geometry_probe,
-                body_style_probe=body_style_probe,
-                furniture_geometry_probe=furniture_geometry_probe,
-                first_page_furniture_probe=first_page_furniture_probe,
-                source_font_probe=source_font_probe,
-                heading_color_probe=heading_color_probe,
-                reference_layout_probe=reference_layout_probe,
-                text_box_placement_probe=text_box_placement_probe,
-                appendix_boundary_probe=appendix_boundary_probe,
-                backmatter_boundary_probe=backmatter_boundary_probe,
+                case_root, temp2tex_report, enabled=variant_search and calibration_eligible,
+                figure_placement_probe=figure_placement_probe and calibration_eligible,
+                table_placement_probe=table_placement_probe and calibration_eligible,
+                float_spacing_probe=float_spacing_probe and calibration_eligible,
+                table_geometry_probe=table_geometry_probe and calibration_eligible,
+                body_style_probe=body_style_probe and calibration_eligible,
+                furniture_geometry_probe=furniture_geometry_probe and calibration_eligible,
+                first_page_furniture_probe=first_page_furniture_probe and calibration_eligible,
+                source_font_probe=source_font_probe and calibration_eligible,
+                heading_color_probe=heading_color_probe and calibration_eligible,
+                reference_layout_probe=reference_layout_probe and calibration_eligible,
+                text_box_placement_probe=text_box_placement_probe and calibration_eligible,
+                appendix_boundary_probe=appendix_boundary_probe and calibration_eligible,
+                backmatter_boundary_probe=backmatter_boundary_probe and calibration_eligible,
             )
             reports["temp_variants"] = variants
             variant_eval = evaluate_temp2tex_variants(
@@ -2559,7 +3068,7 @@ def run_case(
                 "used normalized official Word render as the reference instead."
             )
         if word_reference_render is None:
-            word_reference_render = render_normalized_word_reference(word_source, case_root / "word_reference_render")
+            word_reference_render = render_normalized_word_reference(word_source, case_root / "word_reference_render", fixture_language)
         reports["word_reference_render"] = word_reference_render
         if word_reference_pdf is None:
             word_reference_pdf = Path(word_reference_render.get("pdf") or "") if word_reference_render.get("pdf") else None
@@ -2572,6 +3081,9 @@ def run_case(
                 "Normalized Word reference does not contain the complete regression fixture; case remains not_comparable."
             )
             word_reference_pdf = None
+        if word_reference_pdf and not word_reference_render.get("layout_calibration_eligible", True):
+            reports["needs_review"].append(str(word_reference_render.get("layout_calibration_reason")))
+            word_reference_pdf = None
 
         if word_reference_pdf and word_reference_pdf.exists():
             reference_compile = {
@@ -2581,20 +3093,20 @@ def run_case(
                 "comparison_mode": comparison_mode,
             }
             variants = build_temp2tex_variants(
-                case_root, temp2tex_report, enabled=variant_search,
-                figure_placement_probe=figure_placement_probe,
-                table_placement_probe=table_placement_probe,
-                float_spacing_probe=float_spacing_probe,
-                table_geometry_probe=table_geometry_probe,
-                body_style_probe=body_style_probe,
-                furniture_geometry_probe=furniture_geometry_probe,
-                first_page_furniture_probe=first_page_furniture_probe,
-                source_font_probe=source_font_probe,
-                heading_color_probe=heading_color_probe,
-                reference_layout_probe=reference_layout_probe,
-                text_box_placement_probe=text_box_placement_probe,
-                appendix_boundary_probe=appendix_boundary_probe,
-                backmatter_boundary_probe=backmatter_boundary_probe,
+                case_root, temp2tex_report, enabled=variant_search and calibration_eligible,
+                figure_placement_probe=figure_placement_probe and calibration_eligible,
+                table_placement_probe=table_placement_probe and calibration_eligible,
+                float_spacing_probe=float_spacing_probe and calibration_eligible,
+                table_geometry_probe=table_geometry_probe and calibration_eligible,
+                body_style_probe=body_style_probe and calibration_eligible,
+                furniture_geometry_probe=furniture_geometry_probe and calibration_eligible,
+                first_page_furniture_probe=first_page_furniture_probe and calibration_eligible,
+                source_font_probe=source_font_probe and calibration_eligible,
+                heading_color_probe=heading_color_probe and calibration_eligible,
+                reference_layout_probe=reference_layout_probe and calibration_eligible,
+                text_box_placement_probe=text_box_placement_probe and calibration_eligible,
+                appendix_boundary_probe=appendix_boundary_probe and calibration_eligible,
+                backmatter_boundary_probe=backmatter_boundary_probe and calibration_eligible,
             )
             reports["temp_variants"] = variants
             variant_eval = evaluate_temp2tex_variants(
@@ -2606,6 +3118,8 @@ def run_case(
                 generated_compile_engine=case.get("generated_compile_engine"),
                 comparison_mode=comparison_mode,
                 comparison_dir_name="word-vs-temp2tex",
+                preserve_generated_fixture=True,
+                anchors_json=Path(word_reference_render.get("anchor_contract_path") or ""),
             )
             reports["temp_variant_evaluation"] = variant_eval
             selected_variant = variant_eval.get("selected")
@@ -2623,13 +3137,44 @@ def run_case(
             reports["word_reference_compile"] = reference_compile
             comparable = evaluation.get("status") != "not_comparable"
         else:
-            reports["needs_review"].append("Word-render fallback could not produce both PDFs.")
+            # A reference renderer may be unsuitable for layout calibration,
+            # but package compilation is still an independent hard gate.
+            temp_package_dir = Path(temp2tex_report["package_dir"])
+            temp_norm_main, temp_norm = make_normalized_project(
+                temp_package_dir,
+                temp_package_dir / "main.tex",
+                case_root / "temp2tex_normalized",
+                preserve_existing_fixture=True,
+            )
+            reports["temp_normalization"] = temp_norm
+            if temp_norm_main:
+                temp_compile = compile_latex(
+                    temp_norm_main,
+                    temp_norm_main.parent / "compile_report.json",
+                    engine=case.get("generated_compile_engine"),
+                )
+            reports["temp_compile"] = temp_compile
+            reports["needs_review"].append("Word-render fallback could not produce a layout-calibration PDF pair.")
             comparable = False
             evaluation["comparison_mode"] = comparison_mode
             evaluation["status"] = "not_comparable"
     reports.setdefault("official_compile", official_compile)
     reports.setdefault("temp_compile", temp_compile)
+    evaluation = attach_word_reconstruction_gate(evaluation, reconstruction_gate)
+    comparison_attempted = bool(compare_report.get("comparisons"))
     reports["comparison"] = compare_report
+    reports["comparison_attempted"] = comparison_attempted
+    if not comparison_attempted:
+        reports["comparison_not_attempted_reason"] = (
+            "pending_atomic_audit"
+            if reconstruction_gate.get("applicable") and not reconstruction_gate.get("complete")
+            else "no_comparable_pdf_pair"
+        )
+        evaluation["comparison_attempted"] = False
+        evaluation["comparison_status"] = "not_attempted_" + reports["comparison_not_attempted_reason"]
+    else:
+        evaluation["comparison_attempted"] = True
+        evaluation["comparison_status"] = "completed"
     reports["evaluation"] = evaluation
 
     source_manifest = {
@@ -2669,7 +3214,8 @@ def run_case(
         "grading": grading,
         "evaluation": evaluation,
         "time_seconds": round(time.time() - start, 3),
-        "errors": 0 if evaluation.get("status") == "passed" else 1,
+        "errors": 0 if evaluation.get("status") in {"passed", "pending_atomic_audit"} else 1,
+        "incomplete": evaluation.get("status") == "pending_atomic_audit",
     }
 
 
@@ -2680,7 +3226,7 @@ def build_benchmark(outdir: Path, results: list[dict]) -> dict:
         runs.append({
             "eval_id": idx,
             "eval_name": result["eval_name"],
-            "configuration": "with_skill",
+            "configuration": TOOLING_BASELINE_CONFIGURATION,
             "run_number": 1,
             "result": {
                 "pass_rate": summary["pass_rate"],
@@ -2691,6 +3237,7 @@ def build_benchmark(outdir: Path, results: list[dict]) -> dict:
                 "tokens": 0,
                 "tool_calls": 0,
                 "errors": result["errors"],
+                "incomplete": bool(result.get("incomplete")),
             },
             "expectations": result["grading"]["expectations"],
             "notes": [
@@ -2705,19 +3252,23 @@ def build_benchmark(outdir: Path, results: list[dict]) -> dict:
     pass_rates = [run["result"]["pass_rate"] for run in runs]
     times = [run["result"]["time_seconds"] for run in runs]
     errors = sum(run["result"]["errors"] for run in runs)
+    pending_atomic_audits = sum(1 for result in results if result.get("status") == "pending_atomic_audit")
     benchmark = {
         "metadata": {
             "skill_name": "temp2tex",
             "skill_path": str(SKILL_ROOT),
             "executor_model": "local-regression-runner",
             "analyzer_model": "programmatic",
+            "execution_kind": "deterministic_tooling_baseline",
+            "agent_skill_execution": False,
+            "instruction_following_measured": False,
             "timestamp": utc_now(),
             "evals_run": [r["eval_name"] for r in results],
             "runs_per_configuration": 1,
         },
         "runs": runs,
         "run_summary": {
-            "with_skill": {
+            TOOLING_BASELINE_CONFIGURATION: {
                 "pass_rate": stat_summary(pass_rates),
                 "time_seconds": stat_summary(times),
                 "tokens": stat_summary([0 for _ in runs]),
@@ -2726,13 +3277,15 @@ def build_benchmark(outdir: Path, results: list[dict]) -> dict:
         "notes": [
             f"{len(results)} case(s) run.",
             f"{errors} case(s) have failing expectations or require replacement.",
+            f"{pending_atomic_audits} case(s) are pending Word atomic mapping; these are incomplete training states, not source-comparability failures.",
+            "This benchmark measures deterministic source extraction, package generation, compilation, and comparison tooling; it is not an LLM Temp2TeX skill evaluation.",
             "When official LaTeX exists, the benchmark compares normalized official LaTeX PDFs against normalized Temp2TeX PDFs.",
             "When official LaTeX is unavailable for comparison but Word exists, the benchmark compares a Word-rendered PDF against the generated Temp2TeX PDF.",
         ],
     }
     write_json(outdir / "benchmark.json", benchmark)
     lines = [
-        "# Temp2TeX Regression Benchmark",
+        "# Temp2TeX Tooling Baseline",
         "",
         f"- Cases run: {len(results)}",
         f"- Cases needing attention: {errors}",
@@ -2766,8 +3319,14 @@ def completed_case_results(outdir: Path, manifest: dict, current_results: list[d
         case_root = outdir / case_id
         report_path = case_root / "case_report.json"
         evaluation_path = case_root / "evaluation.json"
-        grading_path = case_root / "with_skill" / "grading.json"
-        timing_path = case_root / "with_skill" / "timing.json"
+        grading_path = case_root / TOOLING_BASELINE_RUN_DIR / "grading.json"
+        timing_path = case_root / TOOLING_BASELINE_RUN_DIR / "timing.json"
+        if not grading_path.exists():
+            # Existing interrupted corpus iterations used the old misleading
+            # directory name. Read them for resumability, but all new runs use
+            # tooling_baseline and all new benchmark metadata is explicit.
+            grading_path = case_root / "with_skill" / "grading.json"
+            timing_path = case_root / "with_skill" / "timing.json"
         if not (report_path.exists() and evaluation_path.exists() and grading_path.exists()):
             continue
         try:
@@ -2785,7 +3344,8 @@ def completed_case_results(outdir: Path, manifest: dict, current_results: list[d
             "grading": grading,
             "evaluation": evaluation,
             "time_seconds": float(timing.get("total_duration_seconds") or 0),
-            "errors": 0 if evaluation.get("status") == "passed" else 1,
+            "errors": 0 if evaluation.get("status") in {"passed", "pending_atomic_audit"} else 1,
+            "incomplete": evaluation.get("status") == "pending_atomic_audit",
         }
     return [merged[case_id] for case_id in [str(case.get("case_id")) for case in manifest.get("cases", [])] if case_id in merged]
 
@@ -2825,18 +3385,18 @@ def generate_review(outdir: Path) -> dict:
         cards.append(
             "<article><h2>{}</h2><p>Status: <strong>{}</strong>; evaluation: {}</p>"
             "<p><a href=\"{}/evaluation.json\">evaluation.json</a> · "
-            "<a href=\"{}/grading.json\">grading.json</a> · "
+            "<a href=\"{}/{}/grading.json\">tooling baseline grading.json</a> | "
             "<a href=\"{}/official-vs-temp2tex/diff_previews/\">diff previews</a></p></article>".format(
                 html.escape(case_id), html.escape(status), html.escape(evaluation),
-                case_dir.as_posix(), case_dir.as_posix(), case_dir.as_posix()
+                case_dir.as_posix(), case_dir.as_posix(), TOOLING_BASELINE_RUN_DIR, case_dir.as_posix()
             )
         )
     document = """<!doctype html>
 <meta charset="utf-8">
-<title>Temp2TeX regression review</title>
+<title>Temp2TeX tooling baseline review</title>
 <style>body{{font:15px system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem}}article{{border:1px solid #ccc;padding:1rem;margin:1rem 0}}h1{{margin-bottom:.25rem}}a{{color:#0645ad}}</style>
-<h1>Temp2TeX regression review</h1>
-<p>Static case index generated by the bundled skill tooling.</p>
+<h1>Temp2TeX tooling baseline review</h1>
+<p>Static case index for deterministic source extraction, compilation, and comparison tooling. It is not an LLM skill-execution evaluation.</p>
 {}
 """.format("\n".join(cards))
     static_path.write_text(document, encoding="utf-8")
@@ -2865,10 +3425,12 @@ def main() -> int:
     parser.add_argument("--text-box-placement-probe", action="store_true", help="Compare only the base package with page/margin-relative Word text-box placement candidates.")
     parser.add_argument("--appendix-boundary-probe", action="store_true", help="Compare the base package with an isolated appendix-new-page candidate; strict promotion requires only the appendix anchor to be shifted in ordinary output.")
     parser.add_argument("--backmatter-boundary-probe", action="store_true", help="Compare the base package with an isolated new-page boundary before acknowledgements/statements; strict promotion requires only backmatter anchors to shift together.")
+    parser.add_argument("--atomic-decisions-dir", help="Optional directory containing model-audited <case-id>.json decisions. Each file is reconciled against the freshly extracted Word ledger; unmatched evidence stays pending.")
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest).expanduser().resolve()
     outdir = Path(args.outdir).expanduser().resolve()
+    atomic_decisions_dir = Path(args.atomic_decisions_dir).expanduser().resolve() if args.atomic_decisions_dir else None
     manifest = read_json(manifest_path)
     outdir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(manifest_path, outdir / "manifest.json")
@@ -2901,23 +3463,27 @@ def main() -> int:
             text_box_placement_probe=args.text_box_placement_probe,
             appendix_boundary_probe=args.appendix_boundary_probe,
             backmatter_boundary_probe=args.backmatter_boundary_probe,
+            atomic_decisions_dir=atomic_decisions_dir,
         ))
     all_results = completed_case_results(outdir, manifest, results)
     benchmark = build_benchmark(outdir, all_results)
+    pending_atomic_audit_cases = [r["case_id"] for r in all_results if r["status"] == "pending_atomic_audit"]
+    failed_or_not_comparable = [r["case_id"] for r in all_results if r["status"] not in {"passed", "pending_atomic_audit"}]
     summary = {
         "generated_at": utc_now(),
         "manifest": str(manifest_path),
         "outdir": str(outdir),
         "case_count": len(all_results),
         "passed_cases": [r["case_id"] for r in all_results if r["status"] == "passed"],
-        "failed_or_not_comparable": [r["case_id"] for r in all_results if r["status"] != "passed"],
+        "failed_or_not_comparable": failed_or_not_comparable,
+        "pending_atomic_audit": pending_atomic_audit_cases,
         "benchmark": str(outdir / "benchmark.json"),
     }
     if args.review:
         summary["review"] = generate_review(outdir)
     write_json(outdir / "regression_summary.json", summary)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    return 0 if not summary["failed_or_not_comparable"] else 1
+    return 0 if not summary["failed_or_not_comparable"] and not summary["pending_atomic_audit"] else 1
 
 
 if __name__ == "__main__":

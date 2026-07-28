@@ -128,7 +128,67 @@ def page_graphic_regions(report: dict, page: int) -> list[dict]:
     return []
 
 
-def image_diff(ref: Path, gen: Path, diff: Path, ignored_graphics: list[dict] | None = None) -> dict:
+def graphic_geometry_diff(reference: list[dict], generated: list[dict], width: int, height: int) -> dict:
+    """Compare embedded-image boxes without looking at their raster content."""
+    if not reference and not generated:
+        return {
+            "status": "not_applicable",
+            "reference_region_count": 0,
+            "generated_region_count": 0,
+            "matched_region_count": 0,
+            "unmatched_reference_count": 0,
+            "unmatched_generated_count": 0,
+            "mean_normalized_box_error": 0.0,
+            "max_normalized_box_error": 0.0,
+        }
+
+    def metric(left: dict, right: dict) -> float:
+        try:
+            lx0, ly0, lx1, ly1 = (float(left[key]) for key in ("x0", "y0", "x1", "y1"))
+            rx0, ry0, rx1, ry1 = (float(right[key]) for key in ("x0", "y0", "x1", "y1"))
+        except (KeyError, TypeError, ValueError):
+            return float("inf")
+        lw, lh = max(1.0, lx1 - lx0), max(1.0, ly1 - ly0)
+        rw, rh = max(1.0, rx1 - rx0), max(1.0, ry1 - ry0)
+        return (
+            abs(((lx0 + lx1) - (rx0 + rx1)) / 2.0) / max(1.0, float(width))
+            + abs(((ly0 + ly1) - (ry0 + ry1)) / 2.0) / max(1.0, float(height))
+            + 0.5 * abs(lw - rw) / max(1.0, float(width))
+            + 0.5 * abs(lh - rh) / max(1.0, float(height))
+        )
+
+    pending = list(generated)
+    errors: list[float] = []
+    for ref in reference:
+        if not pending:
+            break
+        best_index, best_error = min(
+            enumerate(metric(ref, candidate) for candidate in pending),
+            key=lambda item: item[1],
+        )
+        if best_error == float("inf"):
+            continue
+        pending.pop(best_index)
+        errors.append(best_error)
+    return {
+        "status": "compared",
+        "reference_region_count": len(reference),
+        "generated_region_count": len(generated),
+        "matched_region_count": len(errors),
+        "unmatched_reference_count": max(0, len(reference) - len(errors)),
+        "unmatched_generated_count": len(pending),
+        "mean_normalized_box_error": sum(errors) / len(errors) if errors else None,
+        "max_normalized_box_error": max(errors) if errors else None,
+    }
+
+
+def image_diff(
+    ref: Path,
+    gen: Path,
+    diff: Path,
+    ignored_graphics: list[dict] | None = None,
+    graphic_frame_band_px: int = 3,
+) -> dict:
     try:
         from PIL import Image, ImageChops, ImageDraw, ImageOps, ImageStat  # type: ignore
     except Exception as exc:
@@ -164,8 +224,11 @@ def image_diff(ref: Path, gen: Path, diff: Path, ignored_graphics: list[dict] | 
         delta.save(diff)
         comparison_mask = Image.new("L", (width, height), "white")
         mask_draw = ImageDraw.Draw(comparison_mask)
-        # Preserve a small perimeter so geometry differences still contribute.
-        border_px = 4
+        # Image placement is checked separately from these rectangles. Mask
+        # only raster interiors: preserve a narrow perimeter so a visible frame
+        # or rule remains part of the format metric, while differing artwork
+        # pixels cannot dominate it.
+        border_px = max(0, int(graphic_frame_band_px))
         masked_regions = 0
         for region in ignored_graphics or []:
             try:
@@ -208,8 +271,11 @@ def image_diff(ref: Path, gen: Path, diff: Path, ignored_graphics: list[dict] | 
         "format_ink_weighted_diff": format_ink_weighted_diff,
         "format_ink_iou": format_intersection_pixels / format_union_pixels if format_union_pixels else 1.0,
         "format_diff_image": str(diff.with_name(diff.stem + "-format" + diff.suffix)),
+        "canvas_width_px": width,
+        "canvas_height_px": height,
         "ignored_graphic_interior_regions": masked_regions,
         "ignored_graphic_interior_pixels": total_pixels - compared_pixels,
+        "preserved_graphic_frame_band_px": border_px,
     }
 
 
@@ -279,18 +345,35 @@ def main() -> int:
     rendered_gen, gen_render_report = render_pdf(gen_pdf, pages_dir, "generated", args.dpi, args.max_pages)
     reference_graphics = pdf_graphic_regions(ref_pdf, args.dpi, args.max_pages)
     generated_graphics = pdf_graphic_regions(gen_pdf, args.dpi, args.max_pages)
+    graphic_frame_band_px = max(2, round(args.dpi / 72.0 * 1.25))
 
     comparisons = []
     for idx, (ref_img, gen_img) in enumerate(zip(rendered_ref, rendered_gen), 1):
         diff_dir.mkdir(parents=True, exist_ok=True)
-        ignored_graphics = page_graphic_regions(reference_graphics, idx) + page_graphic_regions(generated_graphics, idx)
+        reference_regions = page_graphic_regions(reference_graphics, idx)
+        generated_regions = page_graphic_regions(generated_graphics, idx)
+        ignored_graphics = reference_regions + generated_regions
+        diff = image_diff(
+            ref_img,
+            gen_img,
+            diff_dir / f"page-{idx:03d}-diff.png",
+            ignored_graphics,
+            graphic_frame_band_px,
+        )
+        geometry = graphic_geometry_diff(
+            reference_regions,
+            generated_regions,
+            int(diff.get("canvas_width_px") or 1),
+            int(diff.get("canvas_height_px") or 1),
+        )
         comparisons.append({
             "page": idx,
             "reference_image": str(ref_img),
             "generated_image": str(gen_img),
-            "reference_graphic_regions": page_graphic_regions(reference_graphics, idx),
-            "generated_graphic_regions": page_graphic_regions(generated_graphics, idx),
-            "diff": image_diff(ref_img, gen_img, diff_dir / f"page-{idx:03d}-diff.png", ignored_graphics),
+            "reference_graphic_regions": reference_regions,
+            "generated_graphic_regions": generated_regions,
+            "graphic_geometry": geometry,
+            "diff": diff,
         })
 
     issues = []
@@ -302,7 +385,13 @@ def main() -> int:
         high = [
             c for c in comparisons
             if c["diff"].get("format_normalized_diff", c["diff"].get("normalized_diff", 0)) > 0.20
-            or c["diff"].get("format_ink_weighted_diff", c["diff"].get("ink_weighted_diff", 0)) > 0.20
+            or (
+                not c["reference_graphic_regions"] and not c["generated_graphic_regions"]
+                and c["diff"].get("format_ink_weighted_diff", c["diff"].get("ink_weighted_diff", 0)) > 0.20
+            )
+            or c["graphic_geometry"].get("unmatched_reference_count", 0) > 0
+            or c["graphic_geometry"].get("unmatched_generated_count", 0) > 0
+            or (c["graphic_geometry"].get("max_normalized_box_error") or 0.0) > 0.02
         ]
         if high:
             issues.append(f"{len(high)} compared page(s) have high visual difference; inspect diff_previews.")
@@ -313,18 +402,40 @@ def main() -> int:
     layout_report = layout_diagnostics(ref_pdf, gen_pdf, outdir, args.max_pages, anchors_json)
     layout_summary = layout_report.get("summary") if isinstance(layout_report, dict) else None
     semantic_comparable = layout_summary.get("semantic_comparable") if isinstance(layout_summary, dict) else None
+    zone_comparable = layout_summary.get("zone_comparable") if isinstance(layout_summary, dict) else None
+    contract_scope = layout_summary.get("contract_scope") if isinstance(layout_summary, dict) else None
+    if semantic_comparable is True:
+        comparability_status = "comparable"
+    elif zone_comparable is True:
+        comparability_status = "partial_zone_only"
+    elif semantic_comparable is False:
+        comparability_status = "not_comparable"
+    else:
+        comparability_status = "unavailable"
     layout_comparability = {
-        "status": "not_comparable" if semantic_comparable is False else "comparable" if semantic_comparable is True else "unavailable",
+        "status": comparability_status,
+        "contract_scope": contract_scope,
         "semantic_comparable": semantic_comparable,
+        "zone_comparable": zone_comparable,
         "shared_anchor_count": layout_summary.get("shared_anchor_count") if isinstance(layout_summary, dict) else None,
         "required_anchor_count": layout_summary.get("required_anchor_count") if isinstance(layout_summary, dict) else None,
         "same_content_contract_status": layout_summary.get("same_content_contract_status") if isinstance(layout_summary, dict) else None,
         "text_contract_status": layout_summary.get("text_contract_status") if isinstance(layout_summary, dict) else None,
         "geometry_contract_status": layout_summary.get("geometry_contract_status") if isinstance(layout_summary, dict) else None,
-        "rule": "Layout calibration requires every declared unique same-content anchor to occur in both PDFs.",
+        "local_zone_gate_status": layout_summary.get("local_zone_gate_status") if isinstance(layout_summary, dict) else None,
+        "out_of_tolerance_anchors": layout_summary.get("out_of_tolerance_anchors") if isinstance(layout_summary, dict) else [],
+        "failed_flow_context_anchors": layout_summary.get("failed_flow_context_anchors") if isinstance(layout_summary, dict) else [],
+        "failed_image_zones": layout_summary.get("failed_image_zones") if isinstance(layout_summary, dict) else [],
+        "rule": "Full class calibration requires a full_document contract. A partial_zone contract may calibrate only its declared local zone; flow-relative anchors require their declared same-page context.",
     }
     if layout_comparability["status"] == "not_comparable":
         issues.append("The same-content anchor contract is incomplete; do not use this PDF pair for class calibration.")
+    elif layout_comparability["status"] == "partial_zone_only":
+        issues.append("This PDF pair is comparable only for its declared local zone; do not use it for whole-class calibration.")
+    if layout_comparability["local_zone_gate_status"] == "failed":
+        issues.append("The declared local-zone gate failed; do not promote the affected page-furniture candidate.")
+    if layout_comparability["failed_flow_context_anchors"]:
+        issues.append("A flow-relative zone lost its required same-page context; do not use it for placement calibration.")
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -335,7 +446,8 @@ def main() -> int:
         "rendering": {"reference": ref_render_report, "generated": gen_render_report},
         "graphic_content_policy": {
             "mode": "mask_embedded_graphic_interiors_for_format_metric",
-            "rule": "Ignore raster image interiors only; retain image borders, geometry, captions, page flow, tables, and text in the format comparison.",
+            "rule": "Ignore raster image interiors only; retain a perimeter band for image borders/frames plus geometry, captions, page flow, tables, and text in the format comparison.",
+            "preserved_graphic_frame_band_px": graphic_frame_band_px,
             "reference": reference_graphics,
             "generated": generated_graphics,
         },

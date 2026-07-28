@@ -35,11 +35,25 @@ the interior of each image rectangle and retains a small perimeter. Evaluate
 the resulting `format_*` metrics for the pass/fail visual gate. The ordinary
 pixel metrics remain diagnostic evidence only.
 
+The comparison report records `preserved_graphic_frame_band_px`. This band is
+intentionally outside the raster-content mask so an image border or frame can
+still produce a format difference. It does not extend to captions, surrounding
+whitespace, tables, rules, or nearby body text; those areas are never masked.
+
 The mask does **not** excuse a figure mismatch. Confirm image position, outer
 width and height, border/frame, wrapping or float behavior, caption order,
 caption typography, and the downstream page flow. Tables are never image
 content for this purpose: compare their column widths, rules, merged cells,
 cell alignment, notes, and captions directly.
+
+An injected test object is not source evidence. When an otherwise sparse Word
+template has no observable table or body-artwork object, its normalized table
+or image is an interface smoke test unless both render paths explicitly share
+the same object structure. Do not label that pair `full_document` or use it to
+calibrate page margins, body density, float placement, captions, or table
+rules. A neutral raster placeholder may be shared solely to make the
+image-insensitive metric retain its frame and caption checks; set both declared
+dimensions identically rather than relying on `keepaspectratio`.
 
 Anchor every applicable semantic zone with a phrase unique to the shared test
 manuscript. Treat the resulting JSON map as a same-content contract, not a
@@ -81,6 +95,132 @@ fixture contract can look like this; omit only zones that are genuinely absent:
 Choose a phrase that is unique within the fixed manuscript and survives PDF
 text extraction. Do not use only a label such as `摘要` or `表`; bind the label
 to its role-specific content or numbering.
+
+### Object-To-Word Evidence Binding
+
+When a template has more than one table or figure, give each object/caption
+anchor a stable key such as `table_1` or `figure_2` and bind it to the exact
+current Word evidence IDs. This lets a visual failure return to the one source
+object that produced it instead of sending the next agent through every table
+or figure of the same role.
+
+```json
+{
+  "anchors": {
+    "table_1": {
+      "phrases": ["Table 1: Sample measurements"],
+      "source_evidence_ids": ["table.t001.structure", "p0031"]
+    },
+    "figure_1": {
+      "phrases": ["Figure 1: Workflow overview"],
+      "source_evidence_ids": ["figure.d001.placement", "p0021"]
+    }
+  }
+}
+```
+
+`source_evidence_ids` may be one string or a non-empty string list. Copy IDs
+only from the current ledger/audit; never invent ordinal-looking IDs or reuse
+them after the Word source changes. The layout profile preserves this binding
+in `anchor_source_evidence_ids`. When an object/caption visual cause is
+selected, readiness uses the exact IDs and emits an `--evidence-ids` review
+command. If those IDs are absent from the current audit, it stops with
+`no_matching_evidence_ids`; it must not silently broaden the review to all
+tables or figures.
+
+For an observable Word table or drawing with an adjacent labeled caption,
+`prepare_atomic_mapping_review.py` emits `anchor_contract_candidates` in its
+object review card. Each candidate carries a generated `table_N`/`figure_N`
+key, the source caption phrase, and the object plus caption evidence IDs. It
+is a candidate only: confirm that the phrase is unique in both same-content
+PDFs before copying it into the task anchor map. If Word has no confirmed
+caption relation, or the same source caption relation attaches to multiple
+objects, do not invent this binding; select a rendered context phrase and
+retain a gap-log entry instead.
+## Local Furniture Contracts
+
+Use `partial_zone` only for a narrow page-furniture question. A zone names the
+reference page and a normalized rectangle; an anchor bound to that zone fails
+when the phrase occurs outside it. The optional tolerances make placement a
+machine-readable gate rather than an instruction to eyeball a raw delta.
+
+```json
+{
+  "scope": "partial_zone",
+  "zones": {
+    "first_page_masthead": {
+      "page": 1,
+      "rect_ratio": [0.20, 0.03, 0.88, 0.18],
+      "required_image_count": 1,
+      "max_image_box_delta_pt": 4
+    }
+  },
+  "anchors": {
+    "first_page.journal_name": {
+      "phrases": ["Example Journal of Template Studies"],
+      "zone": "first_page_masthead",
+      "max_bbox_delta_pt": 8
+    },
+    "first_page.issn": {
+      "phrases": ["ISSN: 1234-5678"],
+      "zone": "first_page_masthead",
+      "max_bbox_delta_pt": 8
+    }
+  }
+}
+```
+
+Inspect `document_anchor_deltas` for each text item and
+`document_zone_deltas` for image boxes. `local_zone_gate_status: failed`
+blocks promotion of that header, footer, cover, or first-page candidate even
+when all phrases and assets are present. Image interiors remain out of scope;
+the gate checks only presence, frame geometry, and the relationship to nearby
+text. Do not use a passing local-zone report as proof of body or whole-document
+fidelity.
+
+### Fixed Versus Flow-Relative Placement
+
+Before writing a partial contract, classify the source block. Use the default
+`page_fixed` model only for text, rules, or artwork owned by a Word header,
+footer, page field, or other page-relative drawing. Such a zone must declare a
+source page rectangle, and its anchors use absolute PDF bounding-box
+tolerances. A first-page publisher footer stored in `footer*.xml` is normally
+page-fixed even when the body fixture differs.
+
+Use `flow_relative` only for a block that is part of manuscript flow, such as
+correspondence below an author block or a title-page note that follows the
+abstract. A flow-relative zone has no page rectangle or artwork gate. It must
+name a unique declared `context_anchor`, bind at least one other anchor, and
+give each bound anchor a `max_bbox_delta_pt`. The profiler measures the bound
+anchor relative to its context and requires both to remain on the same page in
+each PDF. It rejects a flow-relative zone without this context or tolerance.
+
+```json
+{
+  "scope": "partial_zone",
+  "zones": {
+    "front_matter_note": {
+      "placement_model": "flow_relative",
+      "context_anchor": "front_matter.title"
+    }
+  },
+  "anchors": {
+    "front_matter.title": {"phrases": ["A Source-Backed Title"]},
+    "front_matter.correspondence": {
+      "phrases": ["Correspondence: editor@example.org"],
+      "zone": "front_matter_note",
+      "max_bbox_delta_pt": 8
+    }
+  }
+}
+```
+
+Do not describe an ordinary body paragraph as page-fixed merely because it
+happens to fall at the same y-coordinate in one render. Conversely, do not use
+a flow-relative contract to excuse a misplaced header/footer. A passed
+flow-relative result may tune only the declared local relationship; it cannot
+calibrate page margins, global body density, pagination, or page furniture.
+
 Do not use text-box, baseline, line-gap, margin, float, or calibration hints
 from that pair to change the class. Supply a shared fixture-specific anchor map
 first. `profile_pdf_layout.py` prefers PyMuPDF and falls back to pdfplumber
@@ -93,11 +233,16 @@ side-by-side fragments with a small gap. Retain the union bounding box and
 matched line count. Do not flatten an entire page into one string: that can
 join unrelated columns or zones and fabricate an anchor.
 
-When page-frame deltas are small and consistent, `suggest_page_calibration.py`
-may produce a pending `page.render_calibration` proposal. Review and rerender
-it as a candidate; enable it only after the comparison improves. If the tool
-reports a large-adjustment warning, do not use its margins: resolve front
-matter, float, or page-flow differences first.
+`suggest_page_calibration.py` may produce a pending
+`page.render_calibration` proposal only after a full-document same-content
+contract passes, reference/generated page counts match, anchors have no page
+shifts, at least two page text boxes are available, and every edge delta stays
+within the tool's cross-page consistency tolerance. A partial-zone contract,
+missing anchor, local-zone failure, page-count mismatch, one-page sample, or
+inconsistent edge direction returns `not_eligible`, not a margin candidate.
+Review and rerender an eligible candidate; enable it only after the comparison
+improves. If the tool reports a large-adjustment warning, do not use its
+margins: resolve front matter, float, or page-flow differences first.
 
 When page count, body-box width, and anchor pages are stable but body density
 still differs consistently across at least two pages, `suggest_body_calibration.py`
@@ -157,12 +302,20 @@ mapping. Reject it if another calibration path is active or if the
 table/figure/caption/float diagnostic score worsens, even when mean pixel diff
 improves.
 
-Interpret the diagnostics in this order: a persistent horizontal body-box
-width/edge difference supports a page-frame investigation. A large vertical
-shift on later anchors (methods, table, figure, references, appendix), while
+Interpret the diagnostics in this order: a central-band text-box width/edge
+difference is only a coarse signal. It supports a page-frame investigation
+only when at least two same-page manuscript-body anchors have a stable
+horizontal shift; otherwise title blocks, furniture, floats, or local indents
+may be defining the measured extremes. A large vertical shift on later anchors
+(methods, table, figure, references, appendix), while
 the title/abstract stay near their expected positions, is a pagination or
 structural-flow problem instead. Repair the front-matter column transition,
 float policy, caption flow, or forced break before proposing a margin change.
+When the reference and generated page counts differ or any required anchor
+changes page, treat every font-size, baseline, line-gap, and body-box hint as
+context only. `global_calibration_eligible: false` means that no global
+page-frame or body-density candidate may be proposed from that report. Resolve
+the flow boundary first and rerun the same fixture.
 7. First-page layout: title block, author block, abstract, keywords, header/footer.
 8. Body page: heading levels, paragraph spacing, line width, indentation.
 9. Table page: caption location, rules, cell spacing, notes.

@@ -165,7 +165,43 @@ biography, corresponding-author, funding, and typography guidance lines.
 When a real author sample continues with instruction text in the same
 paragraph, split its author-name evidence from the trailing guidance run. The
 guidance may explain a rule, but its local colour or emphasis must not become
-the author formatter.
+the author formatter. Record the trailing contiguous run with its own
+`guidance.instruction` candidate in the ledger. The atomic audit must use that
+run candidate rather than inheriting the paragraph's author, title, or keyword
+role. Apply the same rule to appended instructions about English title casing,
+author order, affiliation punctuation, keyword separators, and `Abstract` or
+`Index Terms` labels followed by template-filling prose. Keep the label as
+format evidence while classifying the instruction block and its continuation
+runs separately.
+
+### Front-Matter Triage
+
+Do this before selecting a fallback title or author paragraph. A visible
+publication date, DOI, funding acknowledgement, author biography,
+corresponding-author line, received/revised/accepted notice, classification
+code, or copyright line is front-matter metadata, not author or title evidence.
+Do not use its short length, commas, superscripts, or placement before the
+abstract as a reason to reclassify it.
+
+Treat parenthetical notes and red or imperative prose about page size, type,
+font, line spacing, submission, replacement, or deletion as editorial guidance.
+Retain their text, paragraph/run IDs, and formatting in the ledger, then give
+each unit an explicit semantic guidance disposition. They can supply a stated
+value only for the named target role; they cannot become the title, author, or
+body formatter merely because they occur first.
+
+Choose an article-title fallback only from title-like wording or a role-matched
+title style after excluding the metadata and guidance above. A source that has
+no credible title exemplar is valid: record `not_observable` and keep the
+editable title interface without inventing a title style.
+
+Keep bilingual front matter bounded to the pre-body region. After the first
+confirmed body heading or equivalent body boundary, do not classify later Latin
+text as English title, author, or affiliation evidence. English figure captions,
+table headings, cell contents, and notes belong to their local object or body
+context. A table cell that uses a semantic `Table Title` style is still a table
+cell; it cannot establish an external table-caption formatter without a
+source-visible caption outside the table.
 
 ## Units
 
@@ -565,13 +601,41 @@ without a rendered multi-page comparison.
 Prefer a visible caption paragraph that begins with a concrete label such as
 Table 1, Fig. 1, Figure 2, or its Chinese equivalent over a generic Word
 Caption style name. Keep table and figure evidence separate even when Word
-reuses a style. Instructions such as “Tables should…” or “Figure captions…”
+reuses a style. Instructional prose about tables or figures is not a caption
+exemplar and must not drive caption typography.
 are not caption exemplars and must not drive caption typography.
 
 When no concrete caption is visible, retain the named style as a template-style
 candidate and log the missing rendered exemplar. Map only source-backed caption
 font, alignment, position, and spacing to the LaTeX caption setup; float
 placement still requires a same-content PDF comparison.
+
+When an object has caption candidates immediately above and below it, do not
+select the earlier paragraph just because it appears first in the XML. If a
+visible Figure/Table label matches the object's ordinal, prefer that labelled
+candidate. If equal-distance candidates remain and no label resolves them,
+record `confidence: ambiguous` with both candidates and keep caption position,
+object spacing, and object-specific anchor generation unresolved. A source
+caption relation is evidence, not permission to guess a float direction.
+
+If nearby caption candidates have visible labels but none matches the source
+object ordinal, record `confidence: label_mismatch` and preserve those
+candidates as diagnostic context. Do not downgrade this to a generic nearby
+caption merely because the paragraph is close: template placeholders, grouped
+subfigures, decorative drawings, and metadata tables can all disturb object
+ordinal order. A label mismatch cannot set a class-wide caption position,
+spacing rule, float policy, or object-specific PDF anchor.
+
+Treat every non-confirmed relation as a bounded evidence state. A `distant`
+candidate may support caption typography only when that typography is selected
+independently from a real caption exemplar; it cannot establish attachment,
+order, object/caption spacing, float policy, or a PDF anchor. `ambiguous`,
+`label_mismatch`, and `not_detected` relations cannot set caption behavior at
+all. For `not_detected`, retain local object geometry only and log whether the
+object may be uncaptioned artwork, page furniture, or an incomplete example.
+The `audit_caption_relations.py` report encodes this boundary as
+`evidence_disposition`; downstream decisions must obey its `may_drive` and
+`must_not_drive` lists.
 
 Keep caption outer spacing separate from the caption/object gap. When a caption
 is above, the facing boundary is caption `space-after` against the drawing

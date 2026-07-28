@@ -256,6 +256,15 @@ def convert_omml(math: ET.Element) -> dict:
     """Return a source-transparent conversion result for one m:oMath node."""
     converter = Converter()
     latex = converter.render(math).strip()
+    # A literal caret in m:t is not semantic exponent evidence. Word stores a
+    # true superscript as m:sSup; accepting plain `^` here would turn an
+    # ambiguous source glyph into a fabricated mathematical relationship.
+    math_ns = {"m": M_NS}
+    raw_caret = any("^" in str(node.text or "") for node in math.findall(".//m:t", math_ns))
+    has_semantic_superscript = bool(math.findall(".//m:sSup", math_ns) or math.findall(".//m:sSubSup", math_ns))
+    if raw_caret and not has_semantic_superscript:
+        converter.unsupported.add("ambiguous_raw_caret")
+        converter.notes.add("raw_caret_requires_manual_translation")
     structure = sorted({local_name(node) for node in math.iter() if local_name(node) not in PROPERTY_NODES})
     status = "converted" if latex and not converter.unsupported else ("partial" if latex else "not_convertible")
     return {

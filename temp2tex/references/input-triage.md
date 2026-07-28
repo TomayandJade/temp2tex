@@ -29,6 +29,19 @@ Inspect the payload before trusting the suffix.
 | Protected or encrypted Word file | Do not claim XML/style inspection. Use an accessible official PDF, author page, or user-provided unlocked copy if available. | Protection failure and every replacement evidence source. |
 | Truncated, HTML-disguised, or corrupt download | Reject it as a Word artifact, retry from the official page, or use another official source. | Validation failure; never hash the bad payload as a valid template. |
 
+For a legacy DOC, DOT, or RTF source, retain the derived inspection document
+inside the package workspace rather than relying on a temporary conversion
+that disappears after extraction. Use:
+
+```powershell
+python <temp2tex-skill>/scripts/build_word_format_ledger.py <official-template.doc> --output <package>/word_format_ledger.json --retain-derived-docx derived/legacy-inspection.docx
+```
+
+The ledger binds the original source hash and the retained DOCX hash. The
+derived DOCX is inspection evidence only: render the original legacy file or a
+trusted official PDF before making a source-fidelity claim. A converted DOCX
+must never silently replace the official legacy artifact as the authority.
+
 ## 3. Classify Template Content
 
 - **Populated manuscript example:** prioritize visible role paragraphs and the

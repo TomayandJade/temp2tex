@@ -14,6 +14,32 @@ Use this reference when a task asks whether Temp2TeX matches official journal te
 
 Do not run the full regression suite for a normal user request that only asks for a LaTeX package from a Word/PDF/web template. In that case, deliver the package and optional verification artifacts described in `SKILL.md`.
 
+## What This Runner Measures
+
+`run_regression.py` is a deterministic **tooling baseline**. It exercises
+source discovery, Word extraction, normalizer fixtures, package generation,
+LaTeX compilation, and PDF comparison. It does not load an LLM, consume model
+tokens, or resolve the evidence-bound atomic decisions that an agent must make
+after loading Temp2TeX. Its `tooling_baseline` benchmark configuration may
+identify a reproducible extractor, generator, compiler, or comparator defect;
+it must never be reported as a `with_skill` model result or proof that the
+skill followed its instructions.
+
+Use `references/llm-skill-evaluation.md` to evaluate actual agent behavior.
+The two evaluation layers complement each other: the tooling baseline supplies
+reproducible artifacts and known source conditions, while an LLM evaluation
+tests evidence discipline, editable class design, scope control, and honest
+handoff.
+
+Before a skill-level corpus regression that changes Word object/caption
+extraction, run `audit_caption_relations.py <corpus-root> --inputs-only` for
+each fixed corpus batch. A duplicate confirmed caption assignment is a source
+extraction failure, not evidence that multiple figures or tables share one
+LaTeX caption. Resolve it or preserve it as `ambiguous`/`label_mismatch` before
+using the corpus to tune caption position, spacing, float placement, or PDF
+anchors. This source audit is narrower than the PDF regression and does not
+replace same-content rendering.
+
 ## Goal
 
 When official LaTeX exists, compare two PDFs built from the same regression manuscript:
@@ -21,7 +47,30 @@ When official LaTeX exists, compare two PDFs built from the same regression manu
 1. The official LaTeX template, with its original class/style/preamble retained.
 2. The Temp2TeX-generated LaTeX template, generated from the official Word/DOCX template.
 
-Replace the body of both LaTeX projects with `assets/regression/stress_body.tex` and inject `assets/regression/stress_preamble.tex` before `\begin{document}`. This makes the comparison about template behavior instead of differences between official sample documents. Preserve any source-backed structural wrapper around the injected body: for example, when a Temp2TeX package uses `\twocolumn[...]` for single-column front matter followed by a two-column body, inject the stress title/author/abstract/keyword prefix inside that bracket and the stress body after it. Do not flatten the normalized project to one column, because that invalidates the layout comparison.
+Replace the body of both LaTeX projects with `assets/regression/stress_body.tex` and inject `assets/regression/stress_preamble.tex` before `\begin{document}`. This makes the comparison about template behavior instead of differences between official sample documents. Preserve any source-backed structural wrapper around the injected body: for example, when a package uses `\twocolumn[...]` for single-column front matter followed by a two-column body, inject the stress title/author/abstract/keyword prefix inside that bracket and the stress body after it. When a source instead uses a plain `\twocolumn` transition or `\begin{multicols}{n}` around its body, retain that exact outer transition or environment around the corresponding stress-body segment. Do not flatten the normalized project to one column, because that invalidates the layout comparison.
+
+Before treating an official LaTeX PDF as a golden, compare its retained wrapper with the Word source's ordered section evidence. A Word one-column-to-two-column `nextPage` transition and an official LaTeX continuous `multicols` body are conflicting template systems, even when their paper size and page count happen to match. In that situation, the Word template is the conversion target: mark the official-LaTeX pair `not_comparable`, retain both artifacts and the conflict report, and use a Word-rendered reference only when the renderer preserves the Word transition. Do not tune the generated class toward the conflicting official LaTeX layout.
+
+## Audited Decision Handoff
+
+When a model has completed an `atomic_mapping_decisions.json` review, a regression may reuse it with `--atomic-decisions-dir <directory>`, where each selected case is named `<case-id>.json`. The runner rebuilds the Word ledger first, then invokes `reconcile_atomic_mapping_decisions.py`; only exact or uniquely identity-matched final decisions are carried forward. It also re-audits each declared LaTeX token against the freshly generated package and checks the matching system-format triage. A missing, invalid, stale, ambiguous, or token-invalid decision file leaves the affected units pending and blocks calibration. The handoff does not alter `main.tex` or `journal-template.cls`; it records whether an already-reviewed mapping is eligible to support a later render decision.
+
+For Word-render fallback comparisons, use `normalize_word_stress.py` to place the same fixed manuscript into a *copy* of the official Word file, then generate the Temp2TeX package with `generate_latex_package.py --fixture-profile regression-stress`. `regression-stress` is regression-only and currently covers English fixtures. It must never replace the ordinary editable `main.tex` delivered to a user. The runner applies this profile automatically for English cases. A comparison is eligible for calibration only when its report has `same_content_contract_status: passed`, `text_contract_status: passed`, and `geometry_contract_status: passed`; a successful compilation alone is insufficient.
+
+The runner also enables `--comparison-fixture-artwork` for its generated
+comparison package. This writes neutral single-panel and paired-panel raster
+frames that match the Word normalizer's declared 4.7-inch by 1.875-inch image
+boxes. Their interiors may be masked only after their frames, captions, and
+surrounding flow are compared. This regression-only option never changes the
+ordinary editable package, which keeps a neutral empty figure frame.
+
+Before accepting a Word-render fallback, inspect the normalized Word
+section-flow report. If it contains a `new_page` one-column-to-multicolumn
+transition and the selected renderer is LibreOffice, the PDF is not an eligible
+layout-calibration reference. Mark the case `not_comparable`, retain its Word
+XML transition evidence, and still compile the generated package. LibreOffice
+may be used for ordinary DOCX conversion checks, but it must not override
+Microsoft Word's section-boundary semantics in this regression gate.
 
 Before injection, remove source example metadata commands that start a
 preamble line (`title`, `author`, `affiliation`, `date`, `maketitle`, and
@@ -55,6 +104,38 @@ reference PDF, but official Word/DOCX exists, use a fallback gate:
 3. Compile the Temp2TeX-generated LaTeX package to PDF.
 4. Compare the Word-rendered PDF against the generated PDF.
 5. Record the mode as `word_render_fallback` so it is not confused with an official-LaTeX strict pass.
+
+For every Word source that yields a structured ledger, the runner also places
+`word_format_ledger.json`, `atomic_mapping_decisions.json`, and
+`atomic_mapping_audit.json` in the base generated package before comparison.
+The decisions file is intentionally pending: it is a model worklist, not a
+claim that the generator reconstructed every paragraph/run. The accompanying
+coverage report must retain `atomic_mapping_audit_complete: false` until an
+agent has reviewed decisions against the package and rerun the audit in strict
+mode. Regression visual scores never convert pending atomic mappings into
+verified template rules. The runner may compile and compare the base package
+to preserve a diagnostic baseline, but it disables variant search and every
+placement/spacing/page-flow probe until the strict audit is complete. An
+otherwise passing visual pair is reported as `pending_atomic_audit`, not as a
+strict regression pass.
+
+`pending_atomic_audit` is a third regression outcome, distinct from `passed`
+and `not_comparable`. It means the source artifacts and generated package may
+have compiled, but the model has not completed the ledger-matched mapping work
+needed to interpret PDF differences. The runner records it in a separate
+`pending_atomic_audit` summary bucket and marks the benchmark result
+`incomplete`; do not count it as a source/reference failure or replace the
+case. The command still returns nonzero until that work is completed, so a
+training run cannot be mistaken for a strict pass.
+
+For true legacy DOC/DOT/RTF sources, `run_regression.py` directs
+`build_word_format_ledger.py` to retain a LibreOffice-derived inspection DOCX
+under `derived/legacy-inspection.docx`. The ledger records both original and
+derived SHA-256 hashes, and the generated package copies that file before any
+later audit or comparison. The original binary remains the official evidence.
+If conversion cannot produce a valid OpenXML package, or the retained derived
+file/hash is absent, the case may retain compile/render diagnostics but cannot
+receive a strict regression pass or any layout-calibration probe.
 
 A blank template PDF versus a populated LaTeX test is `not_comparable`. The
 same applies to an instruction-only Word template when the normalized working
@@ -123,13 +204,14 @@ A candidate is admitted only when its official source metadata exists, the downl
 1. Official source page is captured.
 2. Official DOC/DOCX source is present.
 3. If official LaTeX is declared, obtain and normalize it; otherwise render the official Word source as the reference PDF.
-4. The selected official LaTeX or Word-render reference PDF is produced.
-5. Temp2TeX-generated normalized PDF compiles.
-6. Page count matches exactly.
-7. Page size matches within 1 pt.
-8. Required text zones are extractable from both PDFs: title, abstract, keywords, Introduction, Methods, Results, Discussion, References, Appendix.
-9. PDF image comparison produces diff previews.
-10. Average normalized visual diff is at or below 0.03 and max page diff is at or below 0.08 by default.
+4. For readable OpenXML Word evidence, the copied ledger and strict atomic audit are complete and ledger-matched. Until then, only a base diagnostic comparison is permitted.
+5. The selected official LaTeX or Word-render reference PDF is produced.
+6. Temp2TeX-generated normalized PDF compiles.
+7. Page count matches exactly.
+8. Page size matches within 1 pt.
+9. Required text zones are extractable from both PDFs: title, abstract, keywords, Introduction, Methods, Results, Discussion, References, Appendix.
+10. PDF image comparison produces diff previews.
+11. Average normalized visual diff is at or below 0.03 and max page diff is at or below 0.08 by default.
 
 Record `pixel_exact`, `layout_penalty`, and likely layout causes separately. Pixel exactness is a stronger signal than the default gate, and layout diagnostics explain visual failures, but the default gate remains the strict layered acceptance standard.
 
@@ -212,6 +294,14 @@ ordinary floating `journaltable` with a source-derived non-floating candidate.
 Keep the candidate only when rendered same-content evidence selects it; the
 presence of a Word table alone does not establish a journal-wide non-floating
 LaTeX policy.
+
+When the same Word evidence packet shows both captioned inline drawings and a
+flowing representative table, enable both placement probes to evaluate one
+bounded combined candidate after the isolated candidates. This is not a
+cross-product search. Retain the combined result as `render_probe` unless it
+passes every promotion gate and improves on the ordinary package and both
+isolated probes; a partial visual improvement is recorded as a remaining
+object-flow gap.
 
 The strict promotion gate has two modes. Use `stable_visual_calibration` when
 the ordinary package already matches the reference page count; page geometry
@@ -353,3 +443,44 @@ Use this priority order for skill edits:
 4. Tune visual differences only after page count, page size, and required zones are stable. Use layout diagnostics to choose the axis: front-matter spacing, page frame/body box, body density, table/figure caption or float placement, or header/footer behavior. Prefer general axes such as heading-label punctuation, compact heading profiles, page-style profile, caption spacing, and title/abstract spacing before journal-specific overrides.
 
 Do not optimize against one journal by hard-coding its visual output unless the change generalizes to a source-evidence rule such as two-column detection, legacy Word conversion, DVI-era compilation, or class-specific official front matter.
+
+## Object/Caption Source Gate
+
+Before using table/figure visual failures as a training signal, run
+`audit_caption_relations.py` across the affected official Word inputs. Its
+`evidence_disposition` is a prerequisite to interpreting a visual difference:
+
+- `confirmed_source_relation` may produce a bounded caption-order, object-gap,
+  or object-specific anchor candidate.
+- `remote_caption_candidate` is diagnostic only. It may inform a separately
+  selected typography exemplar, but cannot train attachment, spacing, float,
+  or anchor behavior.
+- `label_mismatch`, `ambiguous_source_relation`, and
+  `no_observed_caption_relation` cannot train caption or float behavior. Keep
+  their restrictions in the gap log and resolve them from a rendered Word page
+  or independent source evidence.
+
+Aggregate visual metrics only from cases whose relevant object evidence is
+eligible for the decision under test. An image's raster interior may be masked
+for image-insensitive comparison, but its frame, caption, surrounding flow,
+and all table geometry remain in scope.
+
+## Page-Furniture Rule Guard
+
+Treat every visible Word header/footer line as a separate page-furniture
+requirement. A DrawingML line and its VML compatibility representation are one
+physical rule, not two requirements. Record the active Word part, rule width,
+relative geometry, and whether the rule belongs to a header or footer.
+
+Do not derive a footer rule from a header rule or use an inactive section part.
+Source-backed rule width may be emitted as an editable class candidate when the
+active part is unambiguous. Its baseline, section scope, and horizontal span
+remain render checks. In particular, a two-column LaTeX PDF whose footer line
+spans only one column fails this guard even when compilation succeeds and the
+line width itself is correct. Record it as a furniture-geometry gap and keep it
+out of a full-fidelity claim until a same-content reference comparison confirms
+the intended page-wide extent.
+
+A header/footer-only `partial_zone` comparison may assess that local rule and
+its nearby running text. It cannot calibrate margins, columns, body density,
+float placement, or the general class.

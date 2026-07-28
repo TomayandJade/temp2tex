@@ -32,6 +32,17 @@ def tool_candidates(name: str) -> list[str]:
     return unique
 
 
+def tex_command(executable: str, arguments: list[str], allow_auto_install: bool) -> list[str]:
+    """Build a non-interactive direct-engine command when MiKTeX is in use."""
+    command = [executable]
+    if "miktex" in executable.lower() and not allow_auto_install:
+        # A headless MiKTeX process can wait indefinitely for a package-install
+        # prompt. Fail with the missing .sty/.cls name instead so the agent can
+        # distinguish an environment dependency from a template defect.
+        command.append("--disable-installer")
+    return command + arguments
+
+
 def run(cmd: list[str], cwd: Path, timeout: int = 90) -> dict:
     try:
         proc = subprocess.run(
@@ -72,10 +83,23 @@ def compile_diagnostics(commands: list[dict], engine: str) -> dict:
     overfull_boxes = len(re.findall(r"Overfull \\hbox", output))
     package_warnings = len(re.findall(r"Package [^\n]+ Warning:", output))
     fatal_errors = [item.strip() for item in re.findall(r"^!\s+(.+)$", output, re.MULTILINE)]
+    missing_dependencies = sorted(set(re.findall(r"File `([^`]+\.(?:sty|cls|fd))' not found", output)))
+    if missing_dependencies:
+        failure_category = "missing_tex_dependency"
+    elif final.get("returncode") == 124:
+        failure_category = "tex_engine_timeout"
+    elif final.get("returncode") == 127:
+        failure_category = "tex_engine_not_found"
+    elif fatal_errors:
+        failure_category = "latex_error"
+    else:
+        failure_category = None
     return {
         "final_pass_command": final.get("cmd", []),
         "final_returncode": final.get("returncode"),
         "fatal_errors": fatal_errors,
+        "missing_tex_dependencies": missing_dependencies,
+        "failure_category": failure_category,
         "undefined_references": undefined_references,
         "undefined_citations": undefined_citations,
         "overfull_box_count": overfull_boxes,
@@ -87,6 +111,11 @@ def main() -> int:
     parser.add_argument("main_tex", help="Path to main.tex")
     parser.add_argument("--output", default="compile_report.json")
     parser.add_argument("--engine", choices=["xelatex", "pdflatex", "lualatex", "latex-dvips"], default="xelatex")
+    parser.add_argument(
+        "--allow-auto-install",
+        action="store_true",
+        help="Allow MiKTeX to prompt or install missing packages. Disabled by default so headless runs fail fast with the missing dependency.",
+    )
     args = parser.parse_args()
 
     main_tex = Path(args.main_tex).expanduser().resolve()
@@ -109,7 +138,7 @@ def main() -> int:
         if latex_candidates and dvips_candidates and ps2pdf_candidates:
             latex = latex_candidates[0]
             for _ in range(2):
-                commands.append(run([latex, "-interaction=nonstopmode", "-halt-on-error", main_tex.name], cwd))
+                commands.append(run(tex_command(latex, ["-interaction=nonstopmode", "-halt-on-error", main_tex.name], args.allow_auto_install), cwd))
                 if commands[-1]["returncode"] != 0:
                     break
             dvi = main_tex.with_suffix(".dvi")
@@ -129,7 +158,7 @@ def main() -> int:
         if engine_candidates:
             engine = engine_candidates[0]
             for _ in range(2):
-                commands.append(run([engine, "-interaction=nonstopmode", "-halt-on-error", main_tex.name], cwd))
+                commands.append(run(tex_command(engine, ["-interaction=nonstopmode", "-halt-on-error", main_tex.name], args.allow_auto_install), cwd))
                 if commands[-1]["returncode"] != 0:
                     break
         elif latexmk_candidates:
@@ -145,6 +174,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "main_tex": str(main_tex),
         "engine": args.engine,
+        "auto_install_allowed": args.allow_auto_install,
         "pdf": str(pdf) if success else None,
         "partial_pdf": str(pdf) if pdf.exists() and not success else None,
         "success": success,
@@ -154,6 +184,7 @@ def main() -> int:
     output = Path(args.output)
     if not output.is_absolute():
         output = cwd / output
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(output)
     return 0 if success else 1

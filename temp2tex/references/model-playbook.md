@@ -46,6 +46,21 @@ Use sources in this order:
 
 Record source URLs, local paths, file hashes when available, and access date. Do not use third-party template mirrors as official evidence unless the user explicitly accepts weaker evidence.
 
+## Render Anchor Language
+
+Treat a same-content PDF anchor map as evidence about one populated fixture,
+not as a language-neutral list of English phrases. Build it from short,
+unique text that is actually present in both renders, and record its fixture
+language and profile beside the comparison report. Chinese and bilingual
+fixtures require Chinese/bilingual anchors across the applicable zones; never
+declare them incomparable merely because an English stress-body anchor map was
+used. Conversely, do not hide a missing Chinese role by selecting only English
+anchors. A full-document contract must cover the populated front matter,
+body/headings, tables/captions/notes, figures/captions, references, and
+appendix when present. Use the normalizer's generated anchor contract for its
+built-in CJK `latex-default` fixture; for a journal-specific manuscript,
+write and retain a source-role-specific map.
+
 ## Evidence Extraction
 
 Before extracting individual properties, create the zone-by-zone evidence
@@ -55,7 +70,17 @@ only when a used semantic role or a rendered page supports it.
 
 Extract these decisions before writing LaTeX:
 
-- Page setup: paper size, margin box, column count, column gap, header/footer, page numbering. Inspect every Word section in order: omitted `w:cols` is Word's one-column default. When that first section is followed by an explicit double-column manuscript-body section, make the title/front matter full width and begin the body with a `\twocolumn[...]` transition; do not apply two columns globally from page one. Also inspect child `w:col` widths and paragraph-level `w:br type="column"` elements. Unequal widths or explicit breaks are separate evidence; do not flatten them into ordinary equal-width `twocolumn` output.
+- Page setup: paper size, margin box, column count, column gap, header/footer, page numbering. Inspect every Word section in order: omitted `w:cols` is Word's one-column default. Preserve every explicit `w:pgNumType` format, start/restart, chapter style, and separator as `page.numbering`; a `PAGE` field identifies placement but cannot establish this policy alone. Preserve every explicit `w:lnNumType` as `line.numbering`, including `countBy`, start, distance, restart, and the section boundary. A bare `\linenumbers` is not a reconstruction of these settings. Record any documented OOXML default separately from the raw omitted attribute; do not replace an automatic Word distance with an invented LaTeX point value. For an adjacent one-column-to-double-column transition, record both section indices and the Word break type. Use a wide `\twocolumn[...]` front-matter block only for a source `continuous` transition. A `nextPage` transition requires one-column front matter followed by a new-page `\twocolumn` body; do not flatten it into a wide title block. If an official LaTeX package exists, first confirm that its normalized fixture retains the same transition: an official `multicols` body is not a valid golden for a Word `nextPage` transition, and a flattened one-column fixture is never a valid golden for either. In that conflict, Word remains the primary source; mark the LaTeX pair `not_comparable` and use a renderable Word reference only when its renderer can preserve the section flow. If the source renderer is LibreOffice rather than Microsoft Word, treat a next-page section-flow PDF comparison as unavailable for layout calibration, while retaining the XML evidence and compiling the package. Also inspect child `w:col` widths and paragraph-level `w:br type="column"` elements. Unequal widths or explicit breaks are separate evidence; do not flatten them into ordinary equal-width `twocolumn` output.
+- Text grids: inspect every section's `w:docGrid` and every direct paragraph/style/run `w:snapToGrid`, `w:autoSpaceDE`, `w:autoSpaceDN`, `w:kinsoku`, `w:topLinePunct`, `w:overflowPunct`, and `w:textAlignment`. Record them as `page.text_grid`, separately from ordinary paragraph line spacing. A bare `docGrid` with no type/character pitch and only `linePitch=360` is common Word baseline XML: retain it as observed, but do not create a grid-mapping gate from that fact alone. An explicit grid type, non-baseline pitch, character pitch, active local behavior, or Chinese/mixed local override is layout evidence. An explicit run-level or paragraph/style `snapToGrid=0` in such a relevant system is a local opt-out and must not disappear. Keep raw run boundaries in `source_inventory.json`; review a bounded group only when it has the same scope, part, style/container, and direct/effective policy. For Chinese or mixed templates, do not guess a CTeX baseline-grid, punctuation, or inter-script-spacing approximation from these XML values alone; keep the candidate and require same-content rendering.
+- Paragraph direction: inspect direct/effective `w:bidi` and `w:textDirection` on visible paragraphs and named styles as `paragraph.direction`. Keep this separate from a run's `w:rtl`: paragraph direction changes alignment semantics, start/end indentation, and line flow. Preserve raw paragraphs in `source_inventory.json`, with bounded groups only for matching scope/part/style/table container and direct/effective policy. Treat false/default values as observed provenance, not a mapping gate. For active bidi or non-default text direction, do not activate document-wide RTL or vertical writing; apply an editable role-local interface and verify the actual paragraph, its adjacent content, and its start/end geometry in a same-content render.
+- Paragraph break policy: inspect direct/effective `w:suppressAutoHyphens` and `w:wordWrap` on visible paragraphs and paragraph/table styles as `paragraph.break_policy`. Keep raw paragraphs in `source_inventory.json`; group only matching scope/part/style/table container and direct/effective policy. Explicit `suppressAutoHyphens=1` or `wordWrap=0` is a role-local page-flow override and requires a candidate plus same-content line-break and pagination verification. Permissive/default values remain observed, nonblocking provenance. Do not add a document-wide `\hyphenpenalty`, `\pretolerance`, `\sloppy`, `\raggedright`, or nowrap policy from one title, reference, table, footer, or style.
+- Inline alignment: inspect paragraphs containing a visible Word `w:tab` character. If their effective format contains tab stops, retain type, position, leader, and semantic context as `paragraph.tab_stops`. A legacy DOC conversion can lose the tab node while retaining separate runs with an unusually long whitespace gap; record that as degraded tab evidence only when the rendered source also supports a tab-like split. These layouts are not TOCs by default. Map author, metadata, body, table, and furniture uses separately; do not install a document-wide tab setting from one source paragraph.
+- Drop caps: inspect `w:framePr/@w:dropCap` separately from ordinary paragraph frames. Record mode, line count, anchors/wrapping, the visible initial, and the next body paragraph as `paragraph.drop_cap`. Do not activate a large initial in generic `main.tex`; expose an editable candidate and confirm it in a same-content render.
+- Character effects: retain every visible body/table/furniture/note span carrying `w:smallCaps`, `w:caps`, `w:highlight`, `w:shd`, `w:bdr`, `w:kern`, `w:vanish`, `w:spacing`, `w:w`, `w:position`, `w:outline`, `w:shadow`, `w:emboss`, `w:imprint`, `w14:ligatures`, `w:fitText`, or `w14:textFill` as `run.character_effects`. A `w:bdr` value of `none`/`nil` or zero width is not visible evidence; preserve an active border's type, width, spacing, colour, shadow/frame flags locally. `textFill` must retain its nested fill scheme; do not replace it with an arbitrary solid font colour. `fitText` width and ligatures are local glyph-layout policies, not generic font size or document-wide OpenType defaults. Retain the same properties in a named Word style as a `named_style_rule`, even when the template has no visible exemplar; it is a source rule, not render confirmation. Map both locally to the source role. Treat `w:kern` as Word's font-kerning threshold, not as a direct LaTeX `\kern` length. A style that compiles with ordinary text is not evidence that local letter spacing, fill, border, kerning, ligature, fit-text, highlight, hidden text, or baseline effect matched.
+- Character-style references: for every visible run with `w:rStyle`, record `run.character_styles` with the referenced style ID, resolved effective format, source part, and local span boundary. A run may inherit bold, colour, underline, or font data entirely from this character style. Do not read it as an unformatted run, merge it into the paragraph style, or turn the character style into a document-wide default. Its resolved format is source evidence; rendered confirmation still requires a role-matched same-content page.
+- Run language and complex scripts: inspect `w:lang` (Latin/East Asian/bidi language slots), `w:bCs`, `w:iCs`, `w:cs`, and `w:rtl` in visible runs and named styles. Record them as `run.script_language`, separately from ordinary bold/italic and paragraph alignment. Keep raw span boundaries in `source_inventory.json`; review only bounded groups with identical source kind, scope/part/style/table container, and direct/effective properties, preserving table cell positions as examples rather than duplicate rules. A repeated `en-US` alias is not a reason to add a global language package, and an RTL flag in a footer/table cell is not a reason to make the whole document RTL. Choose XeLaTeX/LuaLaTeX, `fontspec`, `babel`/`polyglossia`, bidi helpers, or complex-script font overrides only for a confirmed source role and only after a role-matched same-content render.
+- Theme formatting: inspect `word/theme/theme1.xml` whenever a visible run or named style uses `themeColor`, `themeTint`, `themeShade`, or an `*Theme` font attribute. Keep the raw palette/font scheme and every original use site in `source_inventory.json`. Use the bounded `document.theme.review_groups` summary in the spec and `word-theme.tex` to work through one role/alias/container combination at a time; its count and example locations are an index, not a replacement for raw evidence. The generic Office theme is not the journal's LaTeX palette. Do not collapse theme aliases into `auto`, choose a global LaTeX font from a theme slot, or discard tint/shade data; render-confirm any applied color or font mapping.
+- Unmodeled OOXML properties: inspect `source_annotations.unmodeled_format_properties` and its generated `unmodeled-word-properties.json` before claiming coverage. For each property node, decide whether it changes a visible role, expresses a documented Word default, is non-format metadata, or remains a gap. Retain the source part, count, and sample attributes. Do not silently drop `kern`, `lang`, complex-script flags, paragraph auto-spacing, text effects, or any later-discovered node just because the current extractor lacks a dedicated field.
 - Page-style assets: header/footer text, rules, logos, issue metadata, page
   numbers, and first-page exceptions. Extract embedded Word media before
   recreating these elements. Map only the header/footer parts referenced by
@@ -72,20 +97,45 @@ Extract these decisions before writing LaTeX:
   figure fixture. Use a neutral editable placeholder until the user supplies
   their own article artwork.
 - Font model: family, base size, line spacing, paragraph indentation, paragraph spacing.
-- Front matter: cover/title page, running title, author order, affiliations, corresponding author, author notes, received/revised/accepted dates.
+- Front matter: read `word_format_ledger.json.front_matter_sequence_review` before choosing any class command. Keep article type/category, manuscript title, subtitle or bilingual title, running title, authors, affiliations, corresponding-author details, editorial/publisher metadata, and received/revised/accepted dates as distinct fields. Metadata may legitimately precede the title; a short running title, DOI, journal identity, or editorial label is never a substitute for the manuscript title. Group visible metadata only by explicit semantic labels: `publication_id`, `doi`, `dates`, `funding`, `contributor_note`, or `editorial_note`. For every detected group, retain the source line, label-run, and value-run evidence separately and map it through `\journalmetadata[kind]{\journalmetadatalabel[kind]{Label:} value}`. Never borrow one group’s font, alignment, or label emphasis for another; an untyped metadata line is a documented fallback. If the sequence review requires semantic confirmation, stop automatic promotion of those candidates and resolve the ordered fields from visible Word context before writing `\articletype{}`, `\title{}`, `\author{}`, or metadata interfaces.
 - Abstracts and keywords: placement, labels, indentation, bold/italic rules, bilingual variants.
 - Contents: whether a table of contents is required or merely present in a template.
-- Headings: level count, numbering, punctuation, casing, spacing, run-in behavior.
+- Headings: level count, numbering, punctuation, casing, spacing, run-in behavior. Derive the level first from the Word heading style or outline level: `Heading 1`, `Heading 2`, and `Heading 3` are distinct source roles and must not be collapsed merely because they share a font or numbering definition. Map them to `\\section`, `\\subsection`, and `\\subsubsection` respectively; retain `Heading 4`/`Heading 5` as `\\paragraph`/`\\subparagraph` when the source uses them. A numbering pattern is supplementary evidence, not permission to flatten semantic Word heading levels into a generic list.
 - Body: paragraph style, lists, equations, theorem-like blocks if present.
-- Tables: caption placement, rules, width behavior, notes, merged or wide examples.
+- Tables: caption placement, rules, width behavior, notes, merged or wide examples,
+  table indentation, default and cell-local padding, row `cantSplit`/height,
+  cell `noWrap`, and positioned-table evidence. Keep these settings in the
+  matching table role and `table-geometry.tex` until same-content rendering
+  confirms a LaTeX implementation; do not infer a document-wide `\tabcolsep`,
+  nonbreaking table rule, or float position from one Word table.
+  Also inspect every used `tblStyle`, its `basedOn` chain, and `tblStylePr`
+  conditional rules. Record them in `table-styles.tex`; a `firstRow`, banding,
+  or first-column rule applies only to a matching source region and must not be
+  guessed from the style name or promoted to all tables.
 - Figures: caption placement, subfigure behavior, artwork size, file format rules.
 - Footnotes and endnotes: markers, placement, author-footnote behavior.
+  Inspect both document settings and every Word section's `footnotePr` or
+  `endnotePr`; a later section can override the marker format, restart, start,
+  or placement. Keep such rules section-local until a matching note reference
+  and rendered page establish a LaTeX implementation.
 - References: bibliography style, citation style, heading text, hanging indent.
 - Appendices: heading style, appendix boundary, and equation/table/figure
   numbering reset.
 - Language: English-only, Chinese-only, or bilingual/CJK needs.
 
-When local inspection tools are unavailable, infer from the visible document text, screenshots, PDF pages, and official instructions. Mark uncertain values as inferred.
+When local inspection tools are unavailable, infer only from visible document
+text, screenshots, PDF pages, and official instructions. Before editing the
+class, create `manual_evidence_ledger.md` using the tool-independent record in
+`atomic-reconstruction.md`, then create `manual_mapping_audit.md` across every
+applicable template zone. Mark uncertain values as inferred/default-backed or
+unresolved. Do not replace the ledger with a prose summary, and do not claim
+that an unseen Word property was inspected.
+
+When a source does not establish body metrics, choose the default profile from
+`journal.language`, not from an isolated English phrase. Use the English profile
+for `en`; use a CJK-safe profile for `zh` and `mixed`. Record every selected
+default with its concrete value, profile, missing evidence, and editable LaTeX
+location in `format_gap_log.md` before handoff.
 
 ## Source-Feature Coverage Gate
 
@@ -119,7 +169,18 @@ editable owner in `journal-template.cls` or `main.tex`. Prioritize run spans,
 page frame, line numbers, page furniture, title, abstract, headings, tables,
 figures, notes, references, and appendix. Do not use margin/font/float tuning
 to mask a `needs_mapping` source feature. An unused similarly named Word style
-is a candidate, not coverage.
+is a candidate, not coverage. When a Word ledger exists, generate and pass the
+strict `atomic_mapping_audit.json` to the coverage audit. The report must show
+complete ledger capture and completed atomic dispositions before it can permit
+visual calibration; this includes header/footer, footnote/endnote, and text-box
+units, not just ordinary body text.
+
+When a ledger is regenerated after extractor changes, do not reuse its old
+`atomic_mapping_decisions.json` as though group identities were unchanged. Run
+`reconcile_atomic_mapping_decisions.py` first. It carries forward only final
+decisions with unchanged evidence identity and candidate roles; every changed or
+ambiguous group returns to the bounded review queue. This is a safety gate, not
+a convenience migration.
 
 For Word OMML equations, source-feature coverage is mapped only when every
 observed equation has a conservative converted candidate in equations.tex.
@@ -133,6 +194,40 @@ translation evidence rather than a guessed formula.
 Treat Word paragraph styles as evidence about semantic roles, not merely as a list
 of fonts. Before mapping a style to LaTeX, inspect representative paragraphs that
 actually use it.
+
+### Front-Matter Role Triage
+
+Before selecting any title or author candidate, separate manuscript content from
+metadata and instructions. Dates, DOI strings, funding, author biographies,
+correspondence, received/revised/accepted notices, classification codes, and
+copyright are `front_matter.metadata`; they are not author evidence even when
+they are short and appear before the abstract. Red, parenthetical, or imperative
+instructions about page layout, fonts, line spacing, replacement, deletion, or
+submission are `guidance.instruction` candidates. Preserve them for semantic
+classification and use an instruction only for the role it explicitly names.
+
+Use a title-like phrase, a visibly used title style, or a placeholder whose role
+is confirmed by surrounding evidence as a title anchor. Never use the first
+non-empty pre-abstract paragraph as a fallback. When the template contains no
+credible title exemplar, record the title as `not_observable`, retain an editable
+title interface, and defer the exact typography rather than fabricating it.
+
+A visible `Title`, `Author`, `Author List`, `Affiliation`, `Institute`, or
+`Address` Word style is a role candidate even when the sample wording contains
+`template` or another editorial marker. Do not discard its visible formatting
+as guidance merely because of that word. Keep the candidate confidence,
+source paragraph, and any instruction evidence together, then resolve the
+ordered front-matter sequence before promoting it into a class interface.
+An explicit instructional sentence beginning with `List`, `Include`, `Please`,
+`Present`, `Authors are`, or a comparable authoring directive remains guidance
+even when it uses an author or affiliation style.
+
+For bilingual templates, identify the end of the bilingual front-matter block
+before assigning English title, author, affiliation, abstract, or keyword roles.
+Later English content in captions, table cells, notes, or body text is not
+front-matter evidence. Preserve table-cell context over style names: a cell using
+`Table Title` is a header/cell candidate, not an external caption, unless a
+separate non-cell caption proves otherwise.
 
 1. Map title, author, affiliation, abstract, keywords, body, each heading level,
    captions, references, and footnotes separately.
@@ -150,6 +245,14 @@ actually use it.
 captions, tables, figure descriptions, acknowledgements, headers, and footnotes
 often occur more often than normal prose in a template sample.
 5. Keep bibliography and body mapping distinct even when both use the same font.
+
+For every body list, inspect `numPr` together with `numbering.xml` or the
+numbering inherited by the paragraph style. Record a `body.list_system` for
+each distinct numbering definition and a `body.list_item` for each visible
+item. Preserve the label text, format, counter start/restart, level, and
+left/hanging indentation. Reference-zone lists are bibliography evidence, not
+body lists. A list's visible numeral or bullet is never heading evidence unless
+independent semantic heading evidence exists.
 
 When the template prose explicitly says that ordinary paragraphs have no blank
 separation, preserve that sentence as a source rule and set the class body
@@ -233,6 +336,9 @@ evidence, not decorative leftovers.
 3. Rebuild header and footer behavior in `journal-template.cls` with editable
    commands such as `\journalheaderleft{...}` and `\journalfooterright{...}`.
    Keep asset placement, dimensions, and first-page exceptions in the class.
+   Use `\journalheaderleftoffset{...}` and its centre/right or first-page
+   variants only from a `page.header_footer_geometry.status: render_verified`
+   record; raw Word anchor offsets alone are not a text-baseline calibration.
 4. Read every tokenized paragraph in an active Word header/footer part. Running
    text and a `PAGE`/`NUMPAGES` field may occupy separate paragraphs; map them
    to editable left/centre/right commands without assuming the first paragraph
@@ -240,18 +346,55 @@ evidence, not decorative leftovers.
    be enabled directly on each safe active part; one unsafe logo or text-box
    variant must not disable an unrelated safe running-text variant. Keep
    first-page drawings and image placement as separately confirmed candidates.
-5. Do not invent a generic running head when the source has custom or
+   Treat a DrawingML line and its VML compatibility fallback as one rule. Keep
+   header and footer rule widths separate. In a two-column document, verify
+   that each page-furniture rule spans the intended text width; a compiled PDF
+   with a one-column footer rule is an unresolved geometry result, not proof
+   that a generic `fancyhdr` setting reproduced the Word template.
+   When a legacy source has two header/footer text runs separated by a long
+   collapsed gap, retain the gap, run boundary, and any surviving tab-stop
+   record as degraded evidence. A same-line `\hfill` candidate is permitted
+   only for that local furniture paragraph and still needs endpoint-box checks
+   in a rendered local-zone comparison.
+5. Classify every active Word furniture part by variant before selecting a
+   LaTeX owner: `first` is title-page-only furniture, `default` is the Word
+   default or odd-page candidate, and `even` is the mirrored-page candidate.
+   A publisher masthead, logo, received/accepted block, licence text, or
+   article citation on the first page is not a running header. Keep it in a
+   separate first-page page style or a named first-page metadata block. Keep
+   default and even running text separate too; do not copy one into the other
+   merely to make a global `fancyhdr` style compile. A multi-paragraph
+   first-page footer is one ordered evidence block, not permission to retain
+   only its first paragraph. `page-furniture.tex` must retain source part,
+   variant, ordered visible paragraphs, and asset candidates for each choice.
+   Enable a first-page style with `\thispagestyle{...}` only at the confirmed
+   title-page boundary; enable mirrored running furniture only after a
+   reference contains both an odd and even running page.
+   Before accepting a local PDF diagnostic, classify the block's placement
+   model. Text or artwork in an active Word header/footer part is `page_fixed`:
+   compare it to a source page rectangle with absolute coordinates. A title,
+   author, correspondence, or note block that participates in document flow is
+   `flow_relative`: compare each selected phrase to an explicit unique local
+   context anchor and require both phrases on the same page in each PDF. Do not
+   use a body-flow mismatch to dismiss a genuine page-fixed footer, and do not
+   use a page rectangle to calibrate a flow-relative title-page block.
+6. Do not invent a generic running head when the source has custom or
    image-based page furniture. Preserve source-backed text/rules when they are
    deterministic, but leave image placement pending in `format_gap_log.md` and
    generate an explicit candidate for PDF comparison. Keep the candidate only
    when it improves the same comparison target; reject it when an official
    LaTeX golden intentionally differs from Word submission furniture.
-6. Treat XML relationship order, Word table-cell order, and raw drawing
+7. Treat XML relationship order, Word table-cell order, and raw drawing
    alignment as placement candidates, not final proof. Word and LibreOffice can
    resolve first-page, mirrored, or right-to-left headers differently. Enable a
    candidate placement only after checking the rendered reference page.
+8. A PDF pair sharing only page-furniture text may use a
+   `partial_zone` anchor contract to measure that header/footer placement.
+   It may not calibrate body width, margins, line density, floats, captions,
+   pagination, or full-document fidelity. Use a `full_document` anchor
+   contract before promoting any class-wide layout decision.
 
-7. When active header/footer parts change across Word sections, keep the
+9. When active header/footer parts change across Word sections, keep the
    section identity and part names in a commented `page-furniture.tex`
    candidate. Do not collapse a later section's running text into a global
    page style unless the manuscript boundary and same-content PDF comparison
@@ -569,6 +712,18 @@ Use defaults only after official evidence is missing or contradictory:
 
 Every default must appear in `template_spec.json` with a reason and in `format_gap_log.md` if it affects visible formatting.
 
+For an abstract length rule, preserve the stated value, unit, source excerpt,
+and evidence status. Treat `300 words` and `300 字` as different constraints;
+do not translate one into the other. Accept a numeric value only when the same
+bounded guidance segment identifies the abstract and contains an explicit limit
+cue. If official sources conflict, retain every candidate, leave the limit
+unset, and log the conflict instead of choosing one.
+
+Treat keyword count separately from abstract length. Record a source-backed
+minimum/maximum only from an explicit `Keywords` or `关键词` constraint, never
+by counting sample keywords. Preserve range bounds and source excerpts;
+conflicting official counts remain unset with every candidate logged.
+
 ## Chinese And Mixed-Language Evidence
 
 Use XeLaTeX and a CJK-safe class whenever visible source text contains Chinese.
@@ -607,6 +762,16 @@ content. `main.tex` may preserve a source-backed heading hierarchy, but must
 not copy title-page samples, abstract instructions, keyword examples, figure or
 table instructions, or bibliography samples into the editable manuscript body.
 
+Apply this rule at the smallest meaningful span, even inside a semantic
+front-matter paragraph. A visible `ABSTRACT:` label can map to the class-backed
+abstract interface while an adjacent sentence such as "do not exceed 300
+words" or "do not cite" is `guidance` with `author_instruction`. Likewise, a
+`KEYWORDS:` label can map to the keyword interface while `Key 1, Key 2` is a
+`placeholder_example`. Do not let a shared Word paragraph cause its imperative
+or sample prose to be recorded as manuscript content. If the extracted ledger
+does not isolate the spans, record the paragraph as guidance or unresolved and
+request a split before asserting that every part is mapped.
+
 Do not assume every official DOCX exposes meaningful Word style names. Some
 publisher templates place the effective font, size, alignment, and spacing in
 paragraph-level `w:pPr/w:rPr` properties. When that happens, extract those
@@ -615,6 +780,29 @@ title, author, affiliation, `摘要`/`Abstract`, `关键词`/`Keywords`, then nu
 body headings. Keep numbered affiliations out of the heading tree. A source
 paragraph beginning `摘要：` or `Abstract:` is evidence for a left-aligned
 inline-label abstract, not the generic centered abstract environment.
+
+When one Word run combines a visible title, author, affiliation, abstract, or
+keyword exemplar with an explicit parenthetical instruction such as "Use this
+style" or "do not exceed", split the ledger at that semantic boundary even
+though Word supplied only one run. Preserve the original run's direct/effective
+format and the character offsets on both fragments. The exemplar remains the
+editable field candidate; only the imperative suffix is `guidance`. Do not put
+the suffix into `main.tex` or discard its typography evidence. Conversely, do
+not split ordinary parenthetical citations, equations, units, or prose merely
+because they use parentheses.
+
+Within one front-matter field, the leading bare label opens the field. Once
+visible substantive field content has appeared, a repeated label followed by
+counts, separators, style instructions, or submission prose is a guidance
+suffix, not a second title/abstract/keyword field. Keep every suffix run as
+guidance and never duplicate the class interface.
+
+If no credible title placeholder is visible before the abstract, record title
+as `not_observable` and retain an editable default-backed `\title{}` interface.
+That missing anchor must not erase independently clear pre-abstract author
+names, affiliation markers, or author-instruction boundaries. Preserve those
+spans as candidates, keep the ordered front-matter sequence under review, and
+do not promote any inferred title typography into a source-fidelity claim.
 
 For direct-format templates, do not select the longest paragraph as the body
 style. Exclude title-page metadata, abstracts, captions, and references; use
